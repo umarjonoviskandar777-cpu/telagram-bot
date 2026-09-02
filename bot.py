@@ -42,6 +42,12 @@ async def download_media(message: types.Message):
         'format': 'bestaudio/best' if is_audio else 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': output_file,
         'default_search': 'ytsearch',
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+            }
+        },
+        'no_check_certificates': True,
     }
 
     if is_audio:
