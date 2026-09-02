@@ -15,19 +15,24 @@ dp = Dispatcher()
 @dp.message(CommandStart())
 async def command_start_handler(message: types.Message):
     await message.answer(
-        "Salom! Menga YouTube, Instagram, TikTok, Facebook yoki Likee tarmoqlaridan video yoki audio havolasini yuboring, uni yuklab beraman."
+        "Salom! Menga YouTube, Instagram, TikTok, Facebook yoki Likee havolasini yuboring (yoki qo'shiq/artist nomini yozing), uni yuklab beraman."
     )
 
 @dp.message()
 async def download_media(message: types.Message):
-    url = message.text.strip()
-    if not url.startswith("http"):
-        await message.answer("Iltimos, to‘g‘ri video yoki audio havolasini yuboring.")
+    query = message.text.strip()
+    if not query:
         return
+
+    # Agar havola bo'lmasa, artist yoki qo'shiq nomi deb qaraymiz va qidirish uchun ytsearch: ishlatamiz
+    if not query.startswith("http"):
+        search_query = f"ytsearch1:{query}"
+    else:
+        search_query = query
 
     is_audio = "audio" in message.caption.lower() if message.caption else False
 
-    processing_msg = await message.answer("Media yuklab olinmoqda, biroz kuting...")
+    processing_msg = await message.answer("Qidirilmoqda va yuklab olinmoqda, biroz kuting...")
     output_extension = "mp3" if is_audio else "mp4"
     output_file = f"media.{output_extension}"
 
@@ -37,6 +42,7 @@ async def download_media(message: types.Message):
     ydl_opts = {
         'format': 'bestaudio/best' if is_audio else 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': output_file,
+        'default_search': 'ytsearch',
     }
 
     if is_audio:
@@ -48,7 +54,7 @@ async def download_media(message: types.Message):
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+            ydl.download([search_query])
 
         if os.path.exists(output_file):
             if is_audio:
@@ -58,7 +64,7 @@ async def download_media(message: types.Message):
             await processing_msg.delete()
             os.remove(output_file)
         else:
-            await processing_msg.edit_text("Mediayo‘lab bo‘lmadi.")
+            await processing_msg.edit_text("Hech narsa topilmadi yoki yuklab bo'lmadi.")
     except Exception as e:
         await processing_msg.edit_text(f"Xatolik yuz berdi: {e}")
 
