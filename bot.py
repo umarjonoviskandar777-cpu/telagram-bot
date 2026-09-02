@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+import sys
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 import yt_dlp
@@ -20,18 +22,12 @@ async def command_start_handler(message: types.Message):
 async def download_media(message: types.Message):
     url = message.text.strip()
     if not url.startswith("http"):
-        await message.answer("Iltimos, to'g'ri video yoki audio havolasini yuboring!")
+        await message.answer("Iltimos, to‘g‘ri video yoki audio havolasini yuboring.")
         return
 
-    # Check if the user wants audio or video.
-    # For this example, we'll download video by default and audio if the user specifically mentions 'audio'.
-    # You can customize this logic based on your needs.
     is_audio = "audio" in message.caption.lower() if message.caption else False
 
-    processing_msg = await message.answer(
-        "⏳ Media yuklab olinmoqda, biroz kuting..."
-    )
-
+    processing_msg = await message.answer("Media yuklab olinmoqda, biroz kuting...")
     output_extension = "mp3" if is_audio else "mp4"
     output_file = f"media.{output_extension}"
 
@@ -41,7 +37,6 @@ async def download_media(message: types.Message):
     ydl_opts = {
         'format': 'bestaudio/best' if is_audio else 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': output_file,
-        'max_filesize': 50 * 1024 * 1024,
     }
 
     if is_audio:
@@ -63,7 +58,7 @@ async def download_media(message: types.Message):
             await processing_msg.delete()
             os.remove(output_file)
         else:
-            await processing_msg.edit_text("Mediayo'lab bo'lmadi.")
+            await processing_msg.edit_text("Mediayo‘lab bo‘lmadi.")
     except Exception as e:
         await processing_msg.edit_text(f"Xatolik yuz berdi: {e}")
 
