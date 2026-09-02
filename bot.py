@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 import yt_dlp
 
-TOKEN = "8297785685:AAHjhwZVXjlenWqy7qQcpxeyawV2jsDLQEn5U"
+TOKEN = "8297785685:AAHjhwZVXjenWqy7qCpxeyawV2jsDLQEn5U"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -15,7 +15,7 @@ dp = Dispatcher()
 @dp.message(CommandStart())
 async def command_start_handler(message: types.Message):
     await message.answer(
-        "Salom! Menga YouTube, Instagram, TikTok, Facebook yoki Likee havolasini yuboring (yoki qo'shiq/artist nomini yozing), uni yuklab beraman."
+        "Salom! Menga YouTube, Instagram, TikTok, Facebook yoki Likee havolasini yuboring (yoki artist/qo'shiq nomini yozing), uni yuklab beraman."
     )
 
 @dp.message()
@@ -24,7 +24,6 @@ async def download_media(message: types.Message):
     if not query:
         return
 
-    # Agar havola bo'lmasa, artist yoki qo'shiq nomi deb qaraymiz va qidirish uchun ytsearch: ishlatamiz
     if not query.startswith("http"):
         search_query = f"ytsearch1:{query}"
     else:
