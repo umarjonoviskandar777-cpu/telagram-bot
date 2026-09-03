@@ -1,4 +1,4 @@
-import asyncio
+asyncio
 import os
 import sqlite3
 from aiogram import Bot, Dispatcher, F, types
@@ -9,20 +9,22 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardBu
 from aiohttp import web
 
 API_TOKEN = os.getenv("BOT_TOKEN")
+
+if not API_TOKEN:
+    raise ValueError("XATOLIK: BOT_TOKEN muhit o'zgaruvchisi topilmadi! Render'da BOT_TOKEN ni sozlang.")
+
 ADMIN_USERNAME = "@buxgalter_0011"
 CHANNEL_USERNAME = "@open_budjet_20277"
-MIN_WITHDRAW_LIMIT = 15000  # Minimal pul yechish chegarasi
-REFERRAL_BONUS = 5000       # Referal uchun beriladigan bonus
+MIN_WITHDRAW_LIMIT = 15000  
+REFERRAL_BONUS = 5000       
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# FSM holatlari (Ovoz berish uchun)
 class VoteState(StatesGroup):
     waiting_for_phone = State()
     waiting_for_screenshot = State()
 
-# --- SQLITE BAZASINI SOZLASH ---
 def init_db():
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
@@ -88,7 +90,6 @@ async def check_subscription(user_id: int):
         return False
     return False
 
-# Asosiy menyu tugmalari (Reply)
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🗳 Ovoz berish"), KeyboardButton(text="👥 Referal")],
@@ -97,7 +98,6 @@ main_keyboard = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True,
 )
-
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -139,7 +139,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
     )
     await message.answer(text=welcome_text, reply_markup=main_keyboard, parse_mode="Markdown")
 
-
 @dp.callback_query(F.data == "check_sub")
 async def callback_check_sub(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
@@ -152,8 +151,6 @@ async def callback_check_sub(callback: types.CallbackQuery, state: FSMContext):
     else:
         await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz yoki bot kanalda admin emas!", show_alert=True)
 
-
-# --- ADMIN PANEL & BROADCAST ---
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message, state: FSMContext):
     await state.clear()
@@ -196,9 +193,6 @@ async def broadcast_handler(message: types.Message, state: FSMContext):
             
     await message.answer(f"📢 Xabar tarqatildi!\n✅ Muvaffaqiyatli: {success}\n❌ Xato: {failed}")
 
-
-# --- MENYU TUGMALARI ---
-
 @dp.message(F.text.func(lambda text: text and "Yordam" in text))
 async def help_handler(message: types.Message, state: FSMContext):
     await state.clear()
@@ -209,7 +203,6 @@ async def help_handler(message: types.Message, state: FSMContext):
         f"Savollar bo'yicha adminga murojaat qiling: {ADMIN_USERNAME}"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=main_keyboard)
-
 
 @dp.message(F.text.func(lambda text: text and "Admin bilan bog'lanish" in text))
 async def admin_contact_handler(message: types.Message, state: FSMContext):
@@ -223,7 +216,6 @@ async def admin_contact_handler(message: types.Message, state: FSMContext):
         f"👤 Savollar va takliflar bo'yicha to'g'ridan-to'g'ri adminimizga murojaat qilishingiz mumkin: {ADMIN_USERNAME}",
         reply_markup=admin_inline
     )
-
 
 @dp.message(F.text.func(lambda text: text and "Referal" in text))
 async def referal_handler(message: types.Message, state: FSMContext):
@@ -240,7 +232,6 @@ async def referal_handler(message: types.Message, state: FSMContext):
         f"Do'stlaringizni taklif qiling va har bir tasdiqlangan ovoz uchun mukofot oling!"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=main_keyboard)
-
 
 @dp.message(F.text.func(lambda text: text and "Hisobim" in text))
 async def balance_handler(message: types.Message, state: FSMContext):
@@ -265,7 +256,6 @@ async def balance_handler(message: types.Message, state: FSMContext):
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=withdraw_keyboard)
 
-
 @dp.callback_query(F.data == "withdraw_request")
 async def withdraw_callback(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -275,16 +265,6 @@ async def withdraw_callback(callback: types.CallbackQuery):
         await callback.answer(f"❌ Pul yechib olish uchun minimal summa {MIN_WITHDRAW_LIMIT} so'm bo'lishi kerak!", show_alert=True)
         return
         
-    admin_text = (
-        f"💸 **Yangi pul yechish arizasi!**\n\n"
-        f"👤 Foydalanuvchi: {callback.from_user.first_name}\n"
-        f"🆔 ID: `{user_id}`\n"
-        f"📱 Telefon: `{user_data['phone']}`\n"
-        f"💰 Summa: {user_data['balance']} so'm"
-    )
-    
-    # Adminga xabar yuborish (Username orqali chat topib bo'lmagani uchun admin ID o'rniga adminga bot orqali murojaat qilish logikasi ishlaydi,
-    # lekin xavfsizlik uchun arizani foydalanuvchiga tasdiqlatamiz va adminga yo'naltiramiz)
     await callback.message.answer(
         f"✅ Pulni yechish uchun arizangiz tayyorlandi!\n"
         f"Iltimos, ushbu summani olish uchun adminimizga yozing: {ADMIN_USERNAME}",
@@ -293,7 +273,6 @@ async def withdraw_callback(callback: types.CallbackQuery):
         ])
     )
     await callback.answer()
-
 
 @dp.message(F.text.func(lambda text: text and "To'lovlar" in text))
 async def proofs_handler(message: types.Message, state: FSMContext):
@@ -309,9 +288,6 @@ async def proofs_handler(message: types.Message, state: FSMContext):
         "• Oxirgi to'lovlar o'z vaqtida tarqatilmoqda ✅"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=channel_keyboard)
-
-
-# --- OVOZ BERISH VA FSM ---
 
 @dp.message(F.text.func(lambda text: text and "Ovoz berish" in text))
 async def vote_handler(message: types.Message, state: FSMContext):
@@ -338,12 +314,10 @@ async def vote_handler(message: types.Message, state: FSMContext):
     await state.set_state(VoteState.waiting_for_phone)
     await message.answer(text, parse_mode="Markdown", reply_markup=phone_keyboard)
 
-
 @dp.message(F.text == "🔙 Ortga")
 async def back_handler(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Asosiy menyuga qaydingiz:", reply_markup=main_keyboard)
-
 
 @dp.message(VoteState.waiting_for_phone)
 async def process_phone(message: types.Message, state: FSMContext):
@@ -367,23 +341,16 @@ async def process_phone(message: types.Message, state: FSMContext):
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=main_keyboard)
 
-
 @dp.message(VoteState.waiting_for_screenshot, F.photo)
 async def process_screenshot(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    full_name = message.from_user.first_name
     user_data = get_user_data(user_id)
-    
-    # Skrinshot qabul qilinganda foydalanuvchiga xabar beramiz va adminga murojaat qilishni aytamiz
-    # Chunki bot to'g'ridan-to'g'ri username (@buxgalter_0011) ga rasm yubora olmaydi (Telegram cheklovi tufayli botlar usernamega rasm forward qilolmaydi, faqat ID kerak).
-    # Shuning uchun foydalanuvchiga adminga o'zi yuborishi uchun ko'rsatma beramiz yoki logikani saqlaymiz.
     
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET votes_count = votes_count + 1 WHERE user_id = ?", (user_id,))
     cursor.execute("UPDATE users SET balance = balance + 15000 WHERE user_id = ?", (user_id,))
     
-    # Referal bonusi
     referrer_id = user_data['referrer_id']
     if referrer_id != 0:
         cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (REFERRAL_BONUS, referrer_id))
@@ -408,8 +375,6 @@ async def process_screenshot(message: types.Message, state: FSMContext):
         reply_markup=admin_inline
     )
 
-
-# Render port talabini qondirish uchun veb-server
 async def handle(request):
     return web.Response(text="Bot ishlayapti!")
 
@@ -422,19 +387,15 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-
 if __name__ == "__main__":
-    if not API_TOKEN:
-        print("XATOLIK: BOT_TOKEN topilmadi.")
-    else:
-        init_db()
-        try:
-            async def run_all():
-                await start_web_server()
-                print("Bot to'liq professional va avtomatlashgan holda ishga tushmoqda...")
-                await bot.delete_webhook(drop_pending_updates=True)
-                await dp.start_polling(bot)
+    init_db()
+    try:
+        async def run_all():
+            await start_web_server()
+            print("Bot to'liq professional va avtomatlashgan holda ishga tushmoqda...")
+            await bot.delete_webhook(drop_pending_updates=True)
+            await dp.start_polling(bot)
 
-            asyncio.run(run_all())
-        except KeyboardInterrupt:
-            print("Bot to'xtatildi.")
+        asyncio.run(run_all())
+    except KeyboardInterrupt:
+        print("Bot to'xtatildi.")
