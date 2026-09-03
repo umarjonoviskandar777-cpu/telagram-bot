@@ -1,65 +1,51 @@
-import logging
+import os
+import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.enums import ParseMode
+from aiogram.types import BufferedInputFile
 
-# Tokeningiz
-TOKEN = "8733052585:AA..."  # O'zingizning bot tokeningiz
+# Tokenni Render’dagi environment variable’dan o‘qiymiz
+API_TOKEN = os.getenv("BOT_TOKEN")
 
-# Open Budget ovoz berish havolasi
-OPEN_BUDGET_LINK = "https://openbudget.uz/boards/2/..." 
-
-logging.basicConfig(level=logging.INFO)
-bot = Bot(token=TOKEN)
+bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-class VoteState(StatesGroup):
-    waiting_for_phone = State()
+# Xush kelibsiz rasmining URL manzili (agar o‘zingizniki bo‘lsa, o‘zgartiring)
+WELCOME_IMAGE_URL = "https://telegra.ph/file/131d4a98c535864ea8c8e.jpg"
+
+async def send_welcome_image(chat_id):
+    """Bot ishga tushganda yoki yangi foydalanuvchiga rasmni yuboradi."""
+    try:
+        # Rasm URL orqali yuklanadi
+        caption = "Assalomu alaykum! Open Budget botiga xush kelibsiz.\n\nIltimos, kerakli bo‘limni tanlang:"
+        await bot.send_photo(chat_id=chat_id, photo=WELCOME_IMAGE_URL, caption=caption)
+    except Exception as e:
+        print(f"Xatolik yuz berdi: {e}")
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🗳 Ovoz berish", callback_data="start_vote")],
-            [InlineKeyboardButton(text="👤 Mening hisobim", callback_data="my_account")],
-            [InlineKeyboardButton(text="📢 Kanalga o'tish", url="https://t.me/open_budjet_20277")]
-        ]
-    )
-    await message.answer(
-        f"Assalomu alaykum, {message.from_user.first_name}!\n"
-        "Open Budgetga ishonchli ovozlarni olyapmiz, hozir ovoz bering!",
-        reply_markup=keyboard
-    )
+    """ /start komandasi uchun handler """
+    # Foydalanuvchiga rasm va matnni yuboramiz
+    await send_welcome_image(message.chat.id)
 
-@dp.callback_query(lambda c: c.data == "start_vote")
-async def process_vote(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Iltimos, telefon raqamingizni yuboring (masalan: +998901234567):")
-    await state.set_state(VoteState.waiting_for_phone)
-    await callback.answer()
+    # Quyida o'zingizning tugmalaringizni qo'shishingiz mumkin
+    # Masalan:
+    # markup = types.ReplyKeyboardMarkup(...)
+    # await message.answer("Asosiy menyu:", reply_markup=markup)
 
-@dp.message(VoteState.waiting_for_phone)
-async def receive_phone(message: types.Message, state: FSMContext):
-    phone = message.text
-    
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="👉 Ovoz berish sahifasiga o'tish", url=OPEN_BUDGET_LINK)]
-        ]
-    )
-    await message.answer(
-        "Rahmat! Raqamingiz qabul qilindi.\n\n"
-        "Endi quyidagi tugmani bosib, ovoz bering:",
-        reply_markup=keyboard
-    )
-    await state.clear()
+# Botni ishga tushirish
+async def main():
+    print("Bot ishga tushmoqda...")
+    # Eskilarni tozalash (uzoq vaqt o'chib qolganda kerak bo'lishi mumkin)
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
-@dp.callback_query(lambda c: c.data == "my_account")
-async def my_account(callback: types.CallbackQuery):
-    await callback.message.answer("Sizning hisobingizda hali ovozlar yo'q.")
-    await callback.answer()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(dp.start_polling(bot))
+if __name__ == '__main__':
+    if not API_TOKEN:
+        print("XATOLIK: BOT_TOKEN topilmadi. Render.com sozlamalarini tekshiring.")
+    else:
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print("Bot to'xtatildi.")
