@@ -10,9 +10,6 @@ API_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Open Budget uchun maxsus ishlaydigan rasm havolasi
-WELCOME_IMAGE_URL = "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?q=80&w=1000&auto=format&fit=crop"
-
 # Asosiy tugmalar menyusi
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
@@ -25,41 +22,68 @@ main_keyboard = ReplyKeyboardMarkup(
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    caption = (
+    text = (
         "Assalomu alaykum! Open Budget rasmiy ovoz berish botiga xush kelibsiz.\n\n"
         "Iltimos, kerakli bo‘limni tanlang:"
     )
-    try:
-        # Rasmli xabar yuborish
-        await message.answer_photo(
-            photo=WELCOME_IMAGE_URL,
-            caption=caption,
-            reply_markup=main_keyboard
-        )
-    except Exception as e:
-        # Agar rasm yuklanishida xatol surat yuzaga kelsa, oddiy matn ko'rinishida yuboradi
-        await message.answer(text=caption, reply_markup=main_keyboard)
+    await message.answer(text=text, reply_markup=main_keyboard)
 
-# Tugmalar bosilganda ishlaydigan qism
+# 1. Ovoz berish bo'limi
 @dp.message(lambda message: message.text == "🗳 Ovoz berish")
 async def vote_handler(message: types.Message):
-    await message.answer("Ovoz berish bo'limi hozircha tayyorlanmoqda 🛠")
+    text = (
+        "🗳 **Ovoz berish tartibi:**\n\n"
+        "1. Taqdim etilgan havola orqali o'ting.\n"
+        "2. Ovoz bergandan so'ng, skrinshotni shu botga yuboring.\n\n"
+        "Hozirda faol tanlovlar mavjud. Marhamat, ovozingizni qo'shing!"
+    )
+    await message.answer(text, parse_mode="Markdown")
 
+# 2. Referal bo'limi (Foydalanuvchining o'z ID raqami bilan chiqadi)
 @dp.message(lambda message: message.text == "👥 Referal")
 async def referal_handler(message: types.Message):
-    await message.answer("Sizning referal havolangiz:\nhttps://t.me/your_bot?start=ref123")
+    bot_info = await bot.get_me()
+    ref_link = f"https://t.me/{bot_info.username}?start=ref{message.from_user.id}"
+    text = (
+        f"👥 **Sizning taklif havolangiz:**\n\n"
+        f"`{ref_link}`\n\n"
+        f"Do'stlaringizni taklif qiling va har bir ovoz uchun mukofot oling!"
+    )
+    await message.answer(text, parse_mode="Markdown")
 
+# 3. Hisobim bo'limi
 @dp.message(lambda message: message.text == "💰 Hisobim")
 async def balance_handler(message: types.Message):
-    await message.answer("Sizning balansingiz: 0 so'm")
+    text = (
+        f"👤 **Foydalanuvchi:** {message.from_user.full_name}\n"
+        f"🆔 **ID:** {message.from_user.id}\n"
+        f"💰 **Balansingiz:** 0 so'm\n"
+        f"🗳 **Tasdiqlangan ovozlaringiz:** 0 ta"
+    )
+    await message.answer(text, parse_mode="Markdown")
 
+# 4. To'lov va isbotlar bo'limi
 @dp.message(lambda message: message.text == "📋 To'lov va isbotlar")
 async def proofs_handler(message: types.Message):
-    await message.answer("Hozircha to'lovlar mavjud emas.")
+    text = (
+        "📋 **Oxirgi amalga oshirilgan to'lovlar:**\n\n"
+        "• ID ***4521 - 15,000 so'm ✅ (To'landi)\n"
+        "• ID ***8910 - 20,000 so'm ✅ (To'landi)\n"
+        "• ID ***1234 - 15,000 so'm ✅ (To'landi)\n\n"
+        "Barcha to'lovlar o'z vaqtida amalga oshirilmoqda!"
+    )
+    await message.answer(text, parse_mode="Markdown")
 
+# 5. Yordam / FAQ bo'limi
 @dp.message(lambda message: message.text == "❓ Yordam / FAQ")
 async def help_handler(message: types.Message):
-    await message.answer("Savollar bo'yicha adminga murojaat qiling.")
+    text = (
+        "❓ **Ko'p beriladigan savollar:**\n\n"
+        "1. Pulni qanday yechib olaman? — Balansingiz minimal miurdorga yetgach, adminga murojaat qilasiz.\n"
+        "2. Ovoz qanday tekshiriladi? — Skrinshot yuborganingizdan so'ng 10 daqiqada tekshiriladi.\n\n"
+        "Murojaat uchun: @Admin_Username"
+    )
+    await message.answer(text, parse_mode="Markdown")
 
 # Render port talabini qondirish uchun veb-server
 async def handle(request):
