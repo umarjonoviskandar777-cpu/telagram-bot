@@ -39,20 +39,18 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-# Botni ishga tushirish
-async def main():
-    # Oldin veb-serverni ishga tushiramiz
-    await start_web_server()
-    
-    print("Bot ishga tushmoqda...")
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
-
+# Hammasini bir vaqtda xatosiz ishga tushirish
 if __name__ == '__main__':
     if not API_TOKEN:
         print("XATOLIK: BOT_TOKEN topilmadi. Render.com sozlamalarini tekshiring.")
     else:
         try:
-            asyncio.run(main())
+            async def run_all():
+                await start_web_server()
+                print("Bot ishga tushmoqda...")
+                await bot.delete_webhook(drop_pending_updates=True)
+                await dp.start_polling(bot)
+
+            asyncio.run(run_all())
         except KeyboardInterrupt:
             print("Bot to'xtatildi.")
