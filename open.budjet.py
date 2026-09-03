@@ -15,8 +15,10 @@ if not API_TOKEN:
 
 ADMIN_USERNAME = "@buxgalter_0011"
 CHANNEL_USERNAME = "@open_budjet_20277"
+
+VOTE_REWARD = 0       
+REFERRAL_BONUS = 0       
 MIN_WITHDRAW_LIMIT = 15000  
-REFERRAL_BONUS = 5000       
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -134,7 +136,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     welcome_text = (
         f"Assalomu alaykum, **{full_name}**!\n\n"
         f"🌟 **Open Budget** rasmiy ko'makchi botiga xush kelibsiz!\n"
-        f"Bu yerda siz ovoz berish orqali o'z hissangizni qo'shishingiz va mukofotlarga ega bo'lishingiz mumkin.\n\n"
+        f"Hozirda mavsum oralig'idamiz. Mavsum boshlanganda ovoz berish va mukofotlar to'liq faollashadi.\n\n"
         f"Quyidagi tugmalardan birini tanlang:"
     )
     await message.answer(text=welcome_text, reply_markup=main_keyboard, parse_mode="Markdown")
@@ -215,7 +217,7 @@ async def referal_handler(message: types.Message, state: FSMContext):
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
     
-    share_url = f"https://t.me/share/url?url={ref_link}&text=🌟+Open+Budget+botiga+kiring+va+ovoz+bering!"
+    share_url = f"https://t.me/share/url?url={ref_link}&text=🌟+Open+Budget+botiga+kiring+va+obuna+bo'ling!"
     
     ref_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -227,7 +229,7 @@ async def referal_handler(message: types.Message, state: FSMContext):
         f"👥 **Sizning taklif havolangiz:**\n\n"
         f"`{ref_link}`\n\n"
         f"📊 **Siz taklif qilgan do'stlaringiz soni:** {user_data['invited_count']} ta\n\n"
-        f"Do'stlaringizni taklif qiling va har bir tasdiqlangan ovoz uchun mukofot oling!"
+        f"Do'stlaringizni taklif qilib bazamizni kengaytiring!"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=ref_keyboard)
 
@@ -283,7 +285,7 @@ async def proofs_handler(message: types.Message, state: FSMContext):
     text = (
         "📋 **To'lovlar va isbotlar bo'limi:**\n\n"
         "Barcha amalga oshirilgan to'lovlar va muvaffaqiyatli ovozlar quyidagi rasmiy kanalimizda e'lon qilib boriladi:\n\n"
-        "• Oxirgi to'lovlar o'z vaqtida tarqatilmoqda ✅"
+        "• Mavsum oralig'ida yangiliklar kanalda e'lon qilinadi ✅"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=channel_keyboard)
 
@@ -305,8 +307,7 @@ async def vote_handler(message: types.Message, state: FSMContext):
 
     text = (
         "🗳 **Ovoz berish tartibi:**\n\n"
-        "1. Open Budget portalida bizning loyihamizga ovoz bering.\n"
-        "2. Ovoz berganingizni tasdiqlovchi skrinshotni yuborishdan oldin telefon raqamingizni kiriting.\n\n"
+        "Hozirda Open Budget mavsumi tugagan. Lekin sinov tariqasida telefon raqamingizni qoldirishingiz mumkin:\n\n"
         "Namuna: `91 123-45-67` yoki +998901234567"
     )
     await state.set_state(VoteState.waiting_for_phone)
@@ -329,49 +330,13 @@ async def process_phone(message: types.Message, state: FSMContext):
         return
 
     update_user_phone(message.from_user.id, phone)
-    await state.set_state(VoteState.waiting_for_screenshot)
     
     text = (
-        "✅ Telefon raqamingiz qabul qilindi!\n\n"
-        "🗳 **Endi navbatdagi qadam:**\n"
-        "1. Open Budget portalida bizning loyihamizga ovoz bering.\n"
-        "2. Ovoz berganingizni tasdiqlovchi **skrinshotni** to'g'ridan-to'g'ri shu botga yuboring."
+        "✅ Telefon raqamingiz saqlandi!\n\n"
+        "🗳 Mavsum boshlanganda ushbu raqam orqali ovoz berish imkoniyati ochiladi."
     )
-    await message.answer(text, parse_mode="Markdown", reply_markup=main_keyboard)
-
-@dp.message(VoteState.waiting_for_screenshot, F.photo)
-async def process_screenshot(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    user_data = get_user_data(user_id)
-    
-    conn = sqlite3.connect("bot_database.db")
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET votes_count = votes_count + 1 WHERE user_id = ?", (user_id,))
-    cursor.execute("UPDATE users SET balance = balance + 15000 WHERE user_id = ?", (user_id,))
-    
-    referrer_id = user_data['referrer_id']
-    if referrer_id != 0:
-        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (REFERRAL_BONUS, referrer_id))
-        try:
-            await bot.send_message(referrer_id, f"👥 Siz taklif qilgan do'stingiz ovoz berdi! Sizga {REFERRAL_BONUS} so'm referal bonusi berildi.")
-        except Exception:
-            pass
-
-    conn.commit()
-    conn.close()
-
-    admin_inline = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Adminga yuborish / Bog'lanish", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")]
-        ]
-    )
-
+    await message.answer(text, reply_markup=main_keyboard)
     await state.clear()
-    await message.answer(
-        "✅ Skrinshotiz va raqamingiz qabul qilindi!\n"
-        "Balansingizga 15,000 so'm qo'shildi. Tasdiqlash uchun skrinshotni adminga ham yuborishingiz mumkin:",
-        reply_markup=admin_inline
-    )
 
 async def handle(request):
     return web.Response(text="Bot ishlayapti!")
@@ -385,15 +350,15 @@ async def start_web_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-if __name__ == "__main__":
+async def main():
     init_db()
-    try:
-        async def run_all():
-            await start_web_server()
-            print("Bot to'liq professional va avtomatlashgan holda ishga tushmoqda...")
-            await bot.delete_webhook(drop_pending_updates=True)
-            await dp.start_polling(bot)
+    await start_web_server()
+    print("Bot to'liq professional va barqaror holda ishga tushmoqda...")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
-        asyncio.run(run_all())
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot to'xtatildi.")
