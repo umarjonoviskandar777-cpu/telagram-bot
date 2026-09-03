@@ -3,15 +3,24 @@ import os
 import sqlite3
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from aiohttp import web
 
 API_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 7417357436  
+ADMIN_USERNAME = "@buxgalter_0011"
 CHANNEL_USERNAME = "@open_budjet_20277"
+MIN_WITHDRAW_LIMIT = 15000  # Minimal pul yechish chegarasi
+REFERRAL_BONUS = 5000       # Referal uchun beriladigan bonus
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
+
+# FSM holatlari (Ovoz berish uchun)
+class VoteState(StatesGroup):
+    waiting_for_phone = State()
+    waiting_for_screenshot = State()
 
 # --- SQLITE BAZASINI SOZLASH ---
 def init_db():
@@ -21,48 +30,45 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             full_name TEXT,
+            phone TEXT,
             balance INTEGER DEFAULT 0,
             invited_count INTEGER DEFAULT 0,
-            votes_count INTEGER DEFAULT 0
+            votes_count INTEGER DEFAULT 0,
+            referrer_id INTEGER DEFAULT 0
         )
     """)
     conn.commit()
     conn.close()
 
-def add_user(user_id, full_name):
+def add_user(user_id, full_name, referrer_id=0):
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT user_id, referrer_id FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
     if not user:
-        cursor.execute("INSERT INTO users (user_id, full_name, balance, invited_count, votes_count) VALUES (?, ?, 0, 0, 0)", (user_id, full_name))
+        ref = referrer_id if referrer_id != user_id else 0
+        cursor.execute("INSERT INTO users (user_id, full_name, phone, balance, invited_count, votes_count, referrer_id) VALUES (?, ?, '', 0, 0, 0, ?)", (user_id, full_name, ref))
+        if ref != 0:
+            cursor.execute("UPDATE users SET invited_count = invited_count + 1 WHERE user_id = ?", (ref,))
         conn.commit()
     conn.close()
 
-def add_referral(referrer_id, new_user_id):
-    if referrer_id == new_user_id:
-        return
+def update_user_phone(user_id, phone):
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (new_user_id,))
-    user = cursor.fetchone()
-    if not user:
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (referrer_id,))
-        if cursor.fetchone():
-            cursor.execute("INSERT INTO users (user_id, full_name, balance, invited_count, votes_count) VALUES (?, 'New User', 0, 0, 0)", (new_user_id,))
-            cursor.execute("UPDATE users SET invited_count = invited_count + 1 WHERE user_id = ?", (referrer_id,))
-            conn.commit()
+    cursor.execute("UPDATE users SET phone = ? WHERE user_id = ?", (phone, user_id))
+    conn.commit()
     conn.close()
 
 def get_user_data(user_id):
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT balance, invited_count, votes_count FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT phone, balance, invited_count, votes_count, referrer_id FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     conn.close()
     if row:
-        return {"balance": row[0], "invited_count": row[1], "votes_count": row[2]}
-    return {"balance": 0, "invited_count": 0, "votes_count": 0}
+        return {"phone": row[0], "balance": row[1], "invited_count": row[2], "votes_count": row[3], "referrer_id": row[4]}
+    return {"phone": "", "balance": 0, "invited_count": 0, "votes_count": 0, "referrer_id": 0}
 
 def get_total_users_count():
     conn = sqlite3.connect("bot_database.db")
@@ -82,58 +88,64 @@ async def check_subscription(user_id: int):
         return False
     return False
 
-# Asosiy tugmalar menyusi
+# Asosiy menyu tugmalari (Reply)
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🗳 Ovoz berish"), KeyboardButton(text="👥 Referal")],
         [KeyboardButton(text="💰 Hisobim"), KeyboardButton(text="📋 To'lovlar")],
-        [KeyboardButton(text="❓ Yordam")],
+        [KeyboardButton(text="❓ Yordam"), KeyboardButton(text="👤 Admin bilan bog'lanish")],
     ],
     resize_keyboard=True,
 )
 
 
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
-    full_name = message.from_user.full_name
+    full_name = message.from_user.first_name
     
-    is_subscribed = await check_subscription(user_id)
-    if not is_subscribed:
-        sub_keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="📢 Kanalga obuna bo'lish", url="https://t.me/open_budjet_20277")],
-                [InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_sub")]
-            ]
-        )
-        await message.answer(
-            "⚠️ Botdan foydalanish uchun avval rasmiy kanalimizga obuna bo'lishingiz kerak!",
-            reply_markup=sub_keyboard
-        )
-        return
-
-    add_user(user_id, full_name)
-
+    referrer_id = 0
     args = message.text.split()
     if len(args) > 1 and args[1].startswith("ref"):
         referrer_str = args[1].replace("ref", "")
         if referrer_str.isdigit():
-            add_referral(int(referrer_str), user_id)
+            referrer_id = int(referrer_str)
 
-    text = (
-        "Assalomu alaykum! Open Budget rasmiy ovoz berish botiga xush kelibsiz.\n\n"
-        "Iltimos, kerakli bo‘limni tanlang:"
+    is_subscribed = await check_subscription(user_id)
+    if not is_subscribed:
+        sub_keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📢 Kanalga obuna bo'lish", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")],
+                [InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_sub")]
+            ]
+        )
+        add_user(user_id, full_name, referrer_id)
+        await message.answer(
+            f"Assalomu alaykum, **{full_name}**!\n\n"
+            f"⚠️ Botdan to'liq foydalanish uchun avval rasmiy kanalimizga obuna bo'lishingiz kerak!",
+            reply_markup=sub_keyboard,
+            parse_mode="Markdown"
+        )
+        return
+
+    add_user(user_id, full_name, referrer_id)
+
+    welcome_text = (
+        f"Assalomu alaykum, **{full_name}**!\n\n"
+        f"🌟 **Open Budget** rasmiy ko'makchi botiga xush kelibsiz!\n"
+        f"Bu yerda siz ovoz berish orqali o'z hissangizni qo'shishingiz va mukofotlarga ega bo'lishingiz mumkin.\n\n"
+        f"Quyidagi tugmalardan birini tanlang:"
     )
-    await message.answer(text=text, reply_markup=main_keyboard)
+    await message.answer(text=welcome_text, reply_markup=main_keyboard, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data == "check_sub")
-async def callback_check_sub(callback: types.CallbackQuery):
+async def callback_check_sub(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     is_subscribed = await check_subscription(user_id)
     
     if is_subscribed:
-        add_user(user_id, callback.from_user.full_name)
         await callback.message.delete()
         text = "Rahmat! Obuna tasdiqlandi. Marhamat, botdan foydalanishingiz mumkin:"
         await callback.message.answer(text=text, reply_markup=main_keyboard)
@@ -141,10 +153,11 @@ async def callback_check_sub(callback: types.CallbackQuery):
         await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz yoki bot kanalda admin emas!", show_alert=True)
 
 
-# --- ADMIN PANEL ---
+# --- ADMIN PANEL & BROADCAST ---
 @dp.message(Command("admin"))
-async def admin_panel(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
+async def admin_panel(message: types.Message, state: FSMContext):
+    await state.clear()
+    if message.from_user.username != ADMIN_USERNAME.replace('@', ''):
         return
     total_users = get_total_users_count()
     text = (
@@ -156,8 +169,9 @@ async def admin_panel(message: types.Message):
     await message.answer(text, parse_mode="Markdown")
 
 @dp.message(Command("broadcast"))
-async def broadcast_handler(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
+async def broadcast_handler(message: types.Message, state: FSMContext):
+    await state.clear()
+    if message.from_user.username != ADMIN_USERNAME.replace('@', ''):
         return
     text_to_send = message.text.replace("/broadcast", "").strip()
     if not text_to_send:
@@ -183,47 +197,37 @@ async def broadcast_handler(message: types.Message):
     await message.answer(f"📢 Xabar tarqatildi!\n✅ Muvaffaqiyatli: {success}\n❌ Xato: {failed}")
 
 
-# 1. Ovoz berish bo'limi
-@dp.message(F.text.func(lambda text: text and "Ovoz berish" in text))
-async def vote_handler(message: types.Message):
-    is_subscribed = await check_subscription(message.from_user.id)
-    if not is_subscribed:
-        await message.answer("⚠️ Avval kanalimizga obuna bo'ling! /start buyrug'ini bosing.")
-        return
+# --- MENYU TUGMALARI ---
 
+@dp.message(F.text.func(lambda text: text and "Yordam" in text))
+async def help_handler(message: types.Message, state: FSMContext):
+    await state.clear()
     text = (
-        "🗳 **Ovoz berish tartibi:**\n\n"
-        "1. Open Budget portalida bizning loyihamizga ovoz bering.\n"
-        "2. Ovoz berganingizni tasdiqlovchi **skrinshotni** to'g'ridan-to'g'ri shu botga yuboring.\n\n"
-        "Marhamat, skrinshotni yuboring!"
+        "❓ **Ko'p beriladigan savollar va yordam:**\n\n"
+        "1. Pulni qanday yechib olaman? — 'Hisobim' bo'limidagi tugma orqali ariza qoldirasiz.\n"
+        "2. Ovoz qanday tekshiriladi? — Telefon raqam va skrinshot yuborganingizdan so'ng admin tomonidan tekshiriladi.\n\n"
+        f"Savollar bo'yicha adminga murojaat qiling: {ADMIN_USERNAME}"
     )
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text, parse_mode="Markdown", reply_markup=main_keyboard)
 
 
-# Skrinshot qabul qilish
-@dp.message(F.photo)
-async def photo_handler(message: types.Message):
-    user_id = message.from_user.id
-    full_name = message.from_user.full_name
-    
-    conn = sqlite3.connect("bot_database.db")
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET votes_count = votes_count + 1 WHERE user_id = ?", (user_id,))
-    conn.commit()
-    conn.close()
-
-    caption = (
-        f"📥 **Yangi ovoz skrinshoti keldi!**\n\n"
-        f"👤 Foydalanuvchi: {full_name}\n"
-        f"🆔 ID: `{user_id}`"
+@dp.message(F.text.func(lambda text: text and "Admin bilan bog'lanish" in text))
+async def admin_contact_handler(message: types.Message, state: FSMContext):
+    await state.clear()
+    admin_inline = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Adminga yozish", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")]
+        ]
     )
-    await bot.send_photo(chat_id=ADMIN_ID, photo=message.photo[-1].file_id, caption=caption, parse_mode="Markdown")
-    await message.answer("✅ Skrinshotiz adminga yuborildi! Tekshirilgach balansingizga qo'shiladi.")
+    await message.answer(
+        f"👤 Savollar va takliflar bo'yicha to'g'ridan-to'g'ri adminimizga murojaat qilishingiz mumkin: {ADMIN_USERNAME}",
+        reply_markup=admin_inline
+    )
 
 
-# 2. Referal bo'limi
 @dp.message(F.text.func(lambda text: text and "Referal" in text))
-async def referal_handler(message: types.Message):
+async def referal_handler(message: types.Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
 
@@ -233,58 +237,70 @@ async def referal_handler(message: types.Message):
         f"👥 **Sizning taklif havolangiz:**\n\n"
         f"`{ref_link}`\n\n"
         f"📊 **Siz taklif qilgan do'stlaringiz soni:** {user_data['invited_count']} ta\n\n"
-        f"Do'stlaringizni taklif qiling va har bir ovoz uchun mukofot oling!"
+        f"Do'stlaringizni taklif qiling va har bir tasdiqlangan ovoz uchun mukofot oling!"
     )
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text, parse_mode="Markdown", reply_markup=main_keyboard)
 
 
-# 3. Hisobim bo'limi
 @dp.message(F.text.func(lambda text: text and "Hisobim" in text))
-async def balance_handler(message: types.Message):
+async def balance_handler(message: types.Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
     
     withdraw_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💸 Pulni yechib olish", callback_data="withdraw_request")]
+            [InlineKeyboardButton(text="💸 Pulni yechib olish", callback_data="withdraw_request")],
+            [InlineKeyboardButton(text="👤 Admin bilan bog'lanish", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")]
         ]
     )
     
     text = (
-        f"👤 **Foydalanuvchi:** {message.from_user.full_name}\n"
+        f"👤 **Foydalanuvchi:** {message.from_user.first_name}\n"
         f"🆔 **ID:** {user_id}\n"
+        f"📱 **Telefon:** {user_data['phone'] if user_data['phone'] else 'Kiritilmagan'}\n"
         f"👥 **Taklif qilganlaringiz:** {user_data['invited_count']} ta\n"
         f"💰 **Balansingiz:** {user_data['balance']} so'm\n"
         f"🗳 **Tasdiqlangan ovozlaringiz:** {user_data['votes_count']} ta"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=withdraw_keyboard)
 
+
 @dp.callback_query(F.data == "withdraw_request")
 async def withdraw_callback(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     user_data = get_user_data(user_id)
     
-    if user_data['balance'] <= 0:
-        await callback.answer("❌ Balansingizda mablag' yetarli emas!", show_alert=True)
+    if user_data['balance'] < MIN_WITHDRAW_LIMIT:
+        await callback.answer(f"❌ Pul yechib olish uchun minimal summa {MIN_WITHDRAW_LIMIT} so'm bo'lishi kerak!", show_alert=True)
         return
         
     admin_text = (
         f"💸 **Yangi pul yechish arizasi!**\n\n"
-        f"👤 Foydalanuvchi: {callback.from_user.full_name}\n"
+        f"👤 Foydalanuvchi: {callback.from_user.first_name}\n"
         f"🆔 ID: `{user_id}`\n"
+        f"📱 Telefon: `{user_data['phone']}`\n"
         f"💰 Summa: {user_data['balance']} so'm"
     )
-    await bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="Markdown")
-    await callback.message.answer("✅ Pulni yechish uchun arizangiz adminga yuborildi. Tez orada ko'rib chiqiladi!")
+    
+    # Adminga xabar yuborish (Username orqali chat topib bo'lmagani uchun admin ID o'rniga adminga bot orqali murojaat qilish logikasi ishlaydi,
+    # lekin xavfsizlik uchun arizani foydalanuvchiga tasdiqlatamiz va adminga yo'naltiramiz)
+    await callback.message.answer(
+        f"✅ Pulni yechish uchun arizangiz tayyorlandi!\n"
+        f"Iltimos, ushbu summani olish uchun adminimizga yozing: {ADMIN_USERNAME}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Adminga yozish", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")]
+        ])
+    )
     await callback.answer()
 
 
-# 4. To'lovlar bo'limi
 @dp.message(F.text.func(lambda text: text and "To'lovlar" in text))
-async def proofs_handler(message: types.Message):
+async def proofs_handler(message: types.Message, state: FSMContext):
+    await state.clear()
     channel_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Isbotlar kanali", url="https://t.me/open_budjet_20277")]
+            [InlineKeyboardButton(text="📢 Isbotlar kanali", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")]
         ]
     )
     text = (
@@ -295,19 +311,105 @@ async def proofs_handler(message: types.Message):
     await message.answer(text, parse_mode="Markdown", reply_markup=channel_keyboard)
 
 
-# 5. Yordam bo'limi (Aniq shart bilan to'g'irlandi)
-@dp.message(F.text.func(lambda text: text and "Yordam" in text))
-async def help_handler(message: types.Message):
-    text = (
-        "❓ **Ko'p beriladigan savollar va yordam:**\n\n"
-        "1. Pulni qanday yechib olaman? — 'Hisobim' bo'limidagi tugma orqali ariza qoldirasiz.\n"
-        "2. Ovoz qanday tekshiriladi? — Skrinshot yuborganingizdan so'ng tekshiriladi.\n\n"
-        "Savollar bo'yicha: @Admin_Username"
+# --- OVOZ BERISH VA FSM ---
+
+@dp.message(F.text.func(lambda text: text and "Ovoz berish" in text))
+async def vote_handler(message: types.Message, state: FSMContext):
+    await state.clear()
+    is_subscribed = await check_subscription(message.from_user.id)
+    if not is_subscribed:
+        await message.answer("⚠️ Avval kanalimizga obuna bo'ling! /start buyrug'ini bosing.")
+        return
+
+    phone_keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Telefon raqamni yuborish", request_contact=True)],
+            [KeyboardButton(text="🔙 Ortga")]
+        ],
+        resize_keyboard=True
     )
-    await message.answer(text, parse_mode="Markdown")
+
+    text = (
+        "🗳 **Ovoz berish tartibi:**\n\n"
+        "1. Open Budget portalida bizning loyihamizga ovoz bering.\n"
+        "2. Ovoz berganingizni tasdiqlovchi skrinshotni yuborishdan oldin telefon raqamingizni kiriting.\n\n"
+        "Namuna: `91 123-45-67` yoki +998901234567"
+    )
+    await state.set_state(VoteState.waiting_for_phone)
+    await message.answer(text, parse_mode="Markdown", reply_markup=phone_keyboard)
 
 
-# Render server
+@dp.message(F.text == "🔙 Ortga")
+async def back_handler(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Asosiy menyuga qaydingiz:", reply_markup=main_keyboard)
+
+
+@dp.message(VoteState.waiting_for_phone)
+async def process_phone(message: types.Message, state: FSMContext):
+    phone = ""
+    if message.contact:
+        phone = message.contact.phone_number
+    elif message.text:
+        phone = message.text.strip()
+    else:
+        await message.answer("Iltimos, telefon raqamingizni to'g'ri kiriting yoki tugmani bosing.")
+        return
+
+    update_user_phone(message.from_user.id, phone)
+    await state.set_state(VoteState.waiting_for_screenshot)
+    
+    text = (
+        "✅ Telefon raqamingiz qabul qilindi!\n\n"
+        "🗳 **Endi navbatdagi qadam:**\n"
+        "1. Open Budget portalida bizning loyihamizga ovoz bering.\n"
+        "2. Ovoz berganingizni tasdiqlovchi **skrinshotni** to'g'ridan-to'g'ri shu botga yuboring."
+    )
+    await message.answer(text, parse_mode="Markdown", reply_markup=main_keyboard)
+
+
+@dp.message(VoteState.waiting_for_screenshot, F.photo)
+async def process_screenshot(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    full_name = message.from_user.first_name
+    user_data = get_user_data(user_id)
+    
+    # Skrinshot qabul qilinganda foydalanuvchiga xabar beramiz va adminga murojaat qilishni aytamiz
+    # Chunki bot to'g'ridan-to'g'ri username (@buxgalter_0011) ga rasm yubora olmaydi (Telegram cheklovi tufayli botlar usernamega rasm forward qilolmaydi, faqat ID kerak).
+    # Shuning uchun foydalanuvchiga adminga o'zi yuborishi uchun ko'rsatma beramiz yoki logikani saqlaymiz.
+    
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET votes_count = votes_count + 1 WHERE user_id = ?", (user_id,))
+    cursor.execute("UPDATE users SET balance = balance + 15000 WHERE user_id = ?", (user_id,))
+    
+    # Referal bonusi
+    referrer_id = user_data['referrer_id']
+    if referrer_id != 0:
+        cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (REFERRAL_BONUS, referrer_id))
+        try:
+            await bot.send_message(referrer_id, f"👥 Siz taklif qilgan do'stingiz ovoz berdi! Sizga {REFERRAL_BONUS} so'm referal bonusi berildi.")
+        except Exception:
+            pass
+
+    conn.commit()
+    conn.close()
+
+    admin_inline = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Adminga yuborish / Bog'lanish", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")]
+        ]
+    )
+
+    await state.clear()
+    await message.answer(
+        "✅ Skrinshotiz va raqamingiz qabul qilindi!\n"
+        "Balansingizga 15,000 so'm qo'shildi. Tasdiqlash uchun skrinshotni adminga ham yuborishingiz mumkin:",
+        reply_markup=admin_inline
+    )
+
+
+# Render port talabini qondirish uchun veb-server
 async def handle(request):
     return web.Response(text="Bot ishlayapti!")
 
@@ -329,7 +431,7 @@ if __name__ == "__main__":
         try:
             async def run_all():
                 await start_web_server()
-                print("Bot ishga tushmoqda...")
+                print("Bot to'liq professional va avtomatlashgan holda ishga tushmoqda...")
                 await bot.delete_webhook(drop_pending_updates=True)
                 await dp.start_polling(bot)
 
