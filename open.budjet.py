@@ -183,8 +183,8 @@ async def broadcast_handler(message: types.Message):
     await message.answer(f"📢 Xabar tarqatildi!\n✅ Muvaffaqiyatli: {success}\n❌ Xato: {failed}")
 
 
-# 1. Ovoz berish bo'limi (F.text.contains orqali so'z bo'yicha tutamiz)
-@dp.message(F.text.contains("Ovoz berish"))
+# 1. Ovoz berish bo'limi
+@dp.message(F.text.func(lambda text: text and "Ovoz berish" in text))
 async def vote_handler(message: types.Message):
     is_subscribed = await check_subscription(message.from_user.id)
     if not is_subscribed:
@@ -222,7 +222,7 @@ async def photo_handler(message: types.Message):
 
 
 # 2. Referal bo'limi
-@dp.message(F.text.contains("Referal"))
+@dp.message(F.text.func(lambda text: text and "Referal" in text))
 async def referal_handler(message: types.Message):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
@@ -239,7 +239,7 @@ async def referal_handler(message: types.Message):
 
 
 # 3. Hisobim bo'limi
-@dp.message(F.text.contains("Hisobim"))
+@dp.message(F.text.func(lambda text: text and "Hisobim" in text))
 async def balance_handler(message: types.Message):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
@@ -280,7 +280,7 @@ async def withdraw_callback(callback: types.CallbackQuery):
 
 
 # 4. To'lovlar bo'limi
-@dp.message(F.text.contains("To'lovlar"))
+@dp.message(F.text.func(lambda text: text and "To'lovlar" in text))
 async def proofs_handler(message: types.Message):
     channel_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -295,8 +295,8 @@ async def proofs_handler(message: types.Message):
     await message.answer(text, parse_mode="Markdown", reply_markup=channel_keyboard)
 
 
-# 5. Yordam bo'limi
-@dp.message(F.text.contains("Yordam"))
+# 5. Yordam bo'limi (Aniq shart bilan to'g'irlandi)
+@dp.message(F.text.func(lambda text: text and "Yordam" in text))
 async def help_handler(message: types.Message):
     text = (
         "❓ **Ko'p beriladigan savollar va yordam:**\n\n"
