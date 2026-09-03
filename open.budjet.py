@@ -78,16 +78,19 @@ async def check_subscription(user_id: int):
         member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
         if member.status in ["creator", "administrator", "member"]:
             return True
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Obunani tekshirishda xatolik (Bot kanalda admin ekanligini tekshiring!): {e}")
+        # Agar bot admin bo'lmasa yoki xato bo'lsa ham ishlayverishi uchun sinov tariqasida True qaytarish mumkin, 
+        # lekin kanalga odam yig'ish uchun bot kanalga admin bo'lishi shart!
+        return False
     return False
 
-# Asosiy tugmalar menyusi
+# Asosiy tugmalar menyusi (Matnlar qisqartirildi va aniq qilindi)
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🗳 Ovoz berish"), KeyboardButton(text="👥 Referal")],
-        [KeyboardButton(text="💰 Hisobim"), KeyboardButton(text="📋 To'lov va isbotlar")],
-        [KeyboardButton(text="❓ Yordam / FAQ")],
+        [KeyboardButton(text="💰 Hisobim"), KeyboardButton(text="📋 To'lovlar")],
+        [KeyboardButton(text="❓ Yordam")],
     ],
     resize_keyboard=True,
 )
@@ -138,7 +141,7 @@ async def callback_check_sub(callback: types.CallbackQuery):
         text = "Rahmat! Obuna tasdiqlandi. Marhamat, botdan foydalanishingiz mumkin:"
         await callback.message.answer(text=text, reply_markup=main_keyboard)
     else:
-        await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz!", show_alert=True)
+        await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz yoki bot kanalda admin emas!", show_alert=True)
 
 
 # --- ADMIN PANEL & STATISTIKA & RASSILKA ---
@@ -238,7 +241,7 @@ async def referal_handler(message: types.Message):
     await message.answer(text, parse_mode="Markdown")
 
 
-# 3. Hisobim bo'limi (Pulni yechish tugmasi bilan)
+# 3. Hisobim bo'limi
 @dp.message(F.text == "💰 Hisobim")
 async def balance_handler(message: types.Message):
     user_id = message.from_user.id
@@ -268,7 +271,6 @@ async def withdraw_callback(callback: types.CallbackQuery):
         await callback.answer("❌ Balansingizda mablag' yetarli emas!", show_alert=True)
         return
         
-    # Adminga pul yechish arizasini yuborish
     admin_text = (
         f"💸 **Yangi pul yechish arizasi!**\n\n"
         f"👤 Foydalanuvchi: {callback.from_user.full_name}\n"
@@ -280,8 +282,8 @@ async def withdraw_callback(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# 4. To'lov va isbotlar bo'limi
-@dp.message(F.text == "📋 To'lov va isbotlar")
+# 4. To'lovlar bo'limi
+@dp.message(F.text == "📋 To'lovlar")
 async def proofs_handler(message: types.Message):
     channel_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -296,8 +298,8 @@ async def proofs_handler(message: types.Message):
     await message.answer(text, parse_mode="Markdown", reply_markup=channel_keyboard)
 
 
-# 5. Yordam / FAQ bo'limi
-@dp.message(F.text == "❓ Yordam / FAQ")
+# 5. Yordam bo'limi
+@dp.message(F.text == "❓ Yordam")
 async def help_handler(message: types.Message):
     text = (
         "❓ **Ko'p beriladigan savollar va yordam:**\n\n"
