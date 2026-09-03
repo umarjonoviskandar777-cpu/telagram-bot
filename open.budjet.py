@@ -2,7 +2,7 @@ import asyncio
 import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiohttp import web
 
 API_TOKEN = os.getenv("BOT_TOKEN")
@@ -28,18 +28,25 @@ async def cmd_start(message: types.Message):
     )
     await message.answer(text=text, reply_markup=main_keyboard)
 
-# 1. Ovoz berish bo'limi
+# 1. Ovoz berish bo'limi (Kanalga havola bilan)
 @dp.message(lambda message: message.text == "🗳 Ovoz berish")
 async def vote_handler(message: types.Message):
+    # Kanalga o'tish uchun tugma
+    channel_keyboard = InlineKeyboardMarkup(
+        inlineKeyboardMarkup=[
+            [InlineKeyboardButton(text="📢 Kanalga o'tish", url="https://t.me/open_budjet_20277")]
+        ]
+    )
     text = (
         "🗳 **Ovoz berish tartibi:**\n\n"
-        "1. Taqdim etilgan havola orqali o'ting.\n"
-        "2. Ovoz bergandan so'ng, skrinshotni shu botga yuboring.\n\n"
-        "Hozirda faol tanlovlar mavjud. Marhamat, ovozingizni qo'shing!"
+        "1. Quyidagi tugma orqali rasmiy kanalimizga o'ting.\n"
+        "2. Kanalda berilgan ko'rsatma bo'yicha ovoz bering.\n"
+        "3. Ovoz berib bo'lgach, skrinshotni shu botga yuboring.\n\n"
+        "Marhamat, kanalimizga o'ting!"
     )
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text, parse_mode="Markdown", reply_markup=channel_keyboard)
 
-# 2. Referal bo'limi (Foydalanuvchining o'z ID raqami bilan chiqadi)
+# 2. Referal bo'limi
 @dp.message(lambda message: message.text == "👥 Referal")
 async def referal_handler(message: types.Message):
     bot_info = await bot.get_me()
@@ -74,16 +81,21 @@ async def proofs_handler(message: types.Message):
     )
     await message.answer(text, parse_mode="Markdown")
 
-# 5. Yordam / FAQ bo'limi
+# 5. Yordam / FAQ bo'limi (Kanal havolasi bilan)
 @dp.message(lambda message: message.text == "❓ Yordam / FAQ")
 async def help_handler(message: types.Message):
-    text = (
-        "❓ **Ko'p beriladigan savollar:**\n\n"
-        "1. Pulni qanday yechib olaman? — Balansingiz minimal miurdorga yetgach, adminga murojaat qilasiz.\n"
-        "2. Ovoz qanday tekshiriladi? — Skrinshot yuborganingizdan so'ng 10 daqiqada tekshiriladi.\n\n"
-        "Murojaat uchun: @Admin_Username"
+    channel_keyboard = InlineKeyboardMarkup(
+        inlineKeyboardMarkup=[
+            [InlineKeyboardButton(text="📢 Bizning kanal", url="https://t.me/open_budjet_20277")]
+        ]
     )
-    await message.answer(text, parse_mode="Markdown")
+    text = (
+        "❓ **Ko'p beriladigan savollar va yordam:**\n\n"
+        "1. Pulni qanday yechib olaman? — Balansingiz minimal miqdorga yetgach, adminga murojaat qilasiz.\n"
+        "2. Ovoz qanday tekshiriladi? — Skrinshot yuborganingizdan so'ng tekshiriladi.\n\n"
+        "Barcha yangiliklar va ma'lumotlar quyidagi kanalimizda e'lon qilib boriladi:"
+    )
+    await message.answer(text, parse_mode="Markdown", reply_markup=channel_keyboard)
 
 # Render port talabini qondirish uchun veb-server
 async def handle(request):
