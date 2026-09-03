@@ -1,4 +1,4 @@
-asyncio
+import asyncio
 import os
 import sqlite3
 from aiogram import Bot, Dispatcher, F, types
@@ -94,7 +94,7 @@ main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🗳 Ovoz berish"), KeyboardButton(text="👥 Referal")],
         [KeyboardButton(text="💰 Hisobim"), KeyboardButton(text="📋 To'lovlar")],
-        [KeyboardButton(text="❓ Yordam"), KeyboardButton(text="👤 Admin bilan bog'lanish")],
+        [KeyboardButton(text="👤 Admin bilan bog'lanish")],
     ],
     resize_keyboard=True,
 )
@@ -193,17 +193,6 @@ async def broadcast_handler(message: types.Message, state: FSMContext):
             
     await message.answer(f"📢 Xabar tarqatildi!\n✅ Muvaffaqiyatli: {success}\n❌ Xato: {failed}")
 
-@dp.message(F.text.func(lambda text: text and "Yordam" in text))
-async def help_handler(message: types.Message, state: FSMContext):
-    await state.clear()
-    text = (
-        "❓ **Ko'p beriladigan savollar va yordam:**\n\n"
-        "1. Pulni qanday yechib olaman? — 'Hisobim' bo'limidagi tugma orqali ariza qoldirasiz.\n"
-        "2. Ovoz qanday tekshiriladi? — Telefon raqam va skrinshot yuborganingizdan so'ng admin tomonidan tekshiriladi.\n\n"
-        f"Savollar bo'yicha adminga murojaat qiling: {ADMIN_USERNAME}"
-    )
-    await message.answer(text, parse_mode="Markdown", reply_markup=main_keyboard)
-
 @dp.message(F.text.func(lambda text: text and "Admin bilan bog'lanish" in text))
 async def admin_contact_handler(message: types.Message, state: FSMContext):
     await state.clear()
@@ -225,13 +214,22 @@ async def referal_handler(message: types.Message, state: FSMContext):
 
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
+    
+    share_url = f"https://t.me/share/url?url={ref_link}&text=🌟+Open+Budget+botiga+kiring+va+ovoz+bering!"
+    
+    ref_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="↗️ Do'stlarga ulashish", url=share_url)]
+        ]
+    )
+
     text = (
         f"👥 **Sizning taklif havolangiz:**\n\n"
         f"`{ref_link}`\n\n"
         f"📊 **Siz taklif qilgan do'stlaringiz soni:** {user_data['invited_count']} ta\n\n"
         f"Do'stlaringizni taklif qiling va har bir tasdiqlangan ovoz uchun mukofot oling!"
     )
-    await message.answer(text, parse_mode="Markdown", reply_markup=main_keyboard)
+    await message.answer(text, parse_mode="Markdown", reply_markup=ref_keyboard)
 
 @dp.message(F.text.func(lambda text: text and "Hisobim" in text))
 async def balance_handler(message: types.Message, state: FSMContext):
