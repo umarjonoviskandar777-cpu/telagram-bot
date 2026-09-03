@@ -72,20 +72,17 @@ def get_total_users_count():
     conn.close()
     return count
 
-# Kanalga obuna bo'lganini tekshirish
 async def check_subscription(user_id: int):
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
         if member.status in ["creator", "administrator", "member"]:
             return True
     except Exception as e:
-        print(f"Obunani tekshirishda xatolik (Bot kanalda admin ekanligini tekshiring!): {e}")
-        # Agar bot admin bo'lmasa yoki xato bo'lsa ham ishlayverishi uchun sinov tariqasida True qaytarish mumkin, 
-        # lekin kanalga odam yig'ish uchun bot kanalga admin bo'lishi shart!
+        print(f"Obunani tekshirishda xatolik: {e}")
         return False
     return False
 
-# Asosiy tugmalar menyusi (Matnlar qisqartirildi va aniq qilindi)
+# Asosiy tugmalar menyusi
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🗳 Ovoz berish"), KeyboardButton(text="👥 Referal")],
@@ -144,7 +141,7 @@ async def callback_check_sub(callback: types.CallbackQuery):
         await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz yoki bot kanalda admin emas!", show_alert=True)
 
 
-# --- ADMIN PANEL & STATISTIKA & RASSILKA ---
+# --- ADMIN PANEL ---
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -183,11 +180,11 @@ async def broadcast_handler(message: types.Message):
         except Exception:
             failed += 1
             
-    await message.answer(f"📢 Xabar tarqatildi!\n✅ Muvaffaqiyatli: {success}\n❌ Xato (botni bloklaganlar): {failed}")
+    await message.answer(f"📢 Xabar tarqatildi!\n✅ Muvaffaqiyatli: {success}\n❌ Xato: {failed}")
 
 
-# 1. Ovoz berish bo'limi
-@dp.message(F.text == "🗳 Ovoz berish")
+# 1. Ovoz berish bo'limi (F.text.contains orqali so'z bo'yicha tutamiz)
+@dp.message(F.text.contains("Ovoz berish"))
 async def vote_handler(message: types.Message):
     is_subscribed = await check_subscription(message.from_user.id)
     if not is_subscribed:
@@ -203,7 +200,7 @@ async def vote_handler(message: types.Message):
     await message.answer(text, parse_mode="Markdown")
 
 
-# Skrinshot qabul qilish va adminga yuborish
+# Skrinshot qabul qilish
 @dp.message(F.photo)
 async def photo_handler(message: types.Message):
     user_id = message.from_user.id
@@ -225,7 +222,7 @@ async def photo_handler(message: types.Message):
 
 
 # 2. Referal bo'limi
-@dp.message(F.text == "👥 Referal")
+@dp.message(F.text.contains("Referal"))
 async def referal_handler(message: types.Message):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
@@ -242,7 +239,7 @@ async def referal_handler(message: types.Message):
 
 
 # 3. Hisobim bo'limi
-@dp.message(F.text == "💰 Hisobim")
+@dp.message(F.text.contains("Hisobim"))
 async def balance_handler(message: types.Message):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
@@ -283,7 +280,7 @@ async def withdraw_callback(callback: types.CallbackQuery):
 
 
 # 4. To'lovlar bo'limi
-@dp.message(F.text == "📋 To'lovlar")
+@dp.message(F.text.contains("To'lovlar"))
 async def proofs_handler(message: types.Message):
     channel_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -299,7 +296,7 @@ async def proofs_handler(message: types.Message):
 
 
 # 5. Yordam bo'limi
-@dp.message(F.text == "❓ Yordam")
+@dp.message(F.text.contains("Yordam"))
 async def help_handler(message: types.Message):
     text = (
         "❓ **Ko'p beriladigan savollar va yordam:**\n\n"
@@ -332,7 +329,7 @@ if __name__ == "__main__":
         try:
             async def run_all():
                 await start_web_server()
-                print("Bot ishga tushmoqda, baza va admin panellar ulandi...")
+                print("Bot ishga tushmoqda...")
                 await bot.delete_webhook(drop_pending_updates=True)
                 await dp.start_polling(bot)
 
