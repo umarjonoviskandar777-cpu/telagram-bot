@@ -1,17 +1,18 @@
-import asyncio
 import os
+import asyncio
 import sqlite3
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
-from aiohttp import web
 
-API_TOKEN = os.getenv("BOT_TOKEN")
+# Tokenni Render'dagi Environment Variables'dan avtomatik o'qiydi
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-if not API_TOKEN:
-    raise ValueError("XATOLIK: BOT_TOKEN muhit o'zgaruvchisi topilmadi! Render'da BOT_TOKEN ni sozlang.")
+if not BOT_TOKEN:
+    raise ValueError("XATOLIK: Render'da BOT_TOKEN topilmadi!")
 
 ADMIN_USERNAME = "@buxgalter_0011"
 CHANNEL_USERNAME = "@open_budjet_20277"
@@ -20,7 +21,7 @@ VOTE_REWARD = 0
 REFERRAL_BONUS = 0       
 MIN_WITHDRAW_LIMIT = 15000  
 
-bot = Bot(token=API_TOKEN)
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 class VoteState(StatesGroup):
@@ -124,7 +125,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         )
         add_user(user_id, full_name, referrer_id)
         await message.answer(
-            f"Assalomu alaykum, **{full_name}**!\n\n"
+            f"Assalomu alaykum, **{full_name}** !\n\n"
             f"⚠️ Botdan to'liq foydalanish uchun avval rasmiy kanalimizga obuna bo'lishingiz kerak!",
             reply_markup=sub_keyboard,
             parse_mode="Markdown"
@@ -134,7 +135,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     add_user(user_id, full_name, referrer_id)
 
     welcome_text = (
-        f"Assalomu alaykum, **{full_name}**!\n\n"
+        f"Assalomu alaykum, **{full_name}** !\n\n"
         f"🌟 **Open Budget** rasmiy ko'makchi botiga xush kelibsiz!\n"
         f"Hozirda mavsum oralig'idamiz. Mavsum boshlanganda ovoz berish va mukofotlar to'liq faollashadi.\n\n"
         f"Quyidagi tugmalardan birini tanlang:"
@@ -338,12 +339,13 @@ async def process_phone(message: types.Message, state: FSMContext):
     await message.answer(text, reply_markup=main_keyboard)
     await state.clear()
 
-async def handle(request):
-    return web.Response(text="Bot ishlayapti!")
+# Render veb-servis uchun port ochib turuvchi qism
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
 
 async def start_web_server():
     app = web.Application()
-    app.router.add_get("/", handle)
+    app.router.add_get("/", handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 10000))
@@ -360,5 +362,5 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         print("Bot to'xtatildi.")
