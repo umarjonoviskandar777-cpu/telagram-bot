@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, BotCommand
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, BotCommand, FSInputFile
 
 # 1. Professional Logging sozlamasi
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -23,15 +23,15 @@ ADMIN_USERNAME = "@buxgalter_0011"
 CHANNEL_USERNAME = "@open_budjet_20277"
 ADMIN_USER_ID = None 
 
-VOTE_REWARD = 0       
-REFERRAL_BONUS = 0       
+REFERRAL_BONUS = 500       # Har bir taklif qilingan do'st uchun beriladigan summa (so'm)
 MIN_WITHDRAW_LIMIT = 15000  
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Anti-Flood (Takroriy bosishdan himoya)
-last_request_time = {}
+# Anti-Flood uchun lug'atlar (5 tadan ko'p xabar yozsa 15 sekund kutish)
+user_message_history = {}
+user_cooldowns = {}
 
 class VoteState(StatesGroup):
     waiting_for_phone = State()
@@ -58,17 +58,18 @@ def init_db():
 def add_user(user_id, full_name, referrer_id=0):
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT user_id, referrer_id FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
     if not user:
         ref = referrer_id if referrer_id != user_id else 0
         joined_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
-            "INSERT INTO users (user_id, full_name, phone, balance, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, '', 0, 0, 0, ?, ?)",
-            (user_id, full_name, ref, joined_date)
+            "INSERT INTO users (user_id, full_name, phone, balance, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, ?, 0, 1, 0, ?, ?)",
+            (user_id, full_name, '', ref, joined_date)
         )
         if ref != 0:
-            cursor.execute("UPDATE users SET invited_count = invited_count + 1 WHERE user_id = ?", (ref,))
+            # Referal uchun bonus qo'shamiz
+            cursor.execute("UPDATE users SET invited_count = invited_count + 1, balance = balance + ? WHERE user_id = ?", (REFERRAL_BONUS, ref))
         conn.commit()
     conn.close()
 
@@ -123,7 +124,6 @@ async def database_backup_task():
         try:
             if ADMIN_USER_ID:
                 if os.path.exists("bot_database.db"):
-                    from aiogram.types import FSInputFile
                     file = FSInputFile("bot_database.db")
                     await bot.send_document(
                         ADMIN_USER_ID, 
@@ -134,17 +134,30 @@ async def database_backup_task():
             logging.error(f"Backup yuborishda xatolik: {e}")
         await asyncio.sleep(86400)
 
-# --- ANTI-FLOOD MIDDLEWARE ---
+# --- ANTI-FLOOD (5 tadan ko'p xabar yozsa 15 sekund bloklash) ---
 @dp.message.middleware()
 async def anti_flood_middleware(handler, event, data):
     if isinstance(event, types.Message) and event.from_user:
         user_id = event.from_user.id
         now = datetime.now().timestamp()
-        if user_id in last_request_time:
-            if now - last_request_time[user_id] < 0.8:
-                await event.answer("⚠️ Juda tez-tez yozyapsiz! Iltimos, ozgina kuting.")
-                return
-        last_request_time[user_id] = now
+        
+        if user_id in user_cooldowns and now < user_cooldowns[user_id]:
+            left = int(user_cooldowns[user_id] - now)
+            await event.answer(f"⚠️ Juda ko'p va tez yozdingiz! Iltimos, {left} sekund kuting.")
+            return
+        
+        if user_id not in user_message_history:
+            user_message_history[user_id] = []
+        
+        user_message_history[user_id] = [t for t in user_message_history[user_id] if now - t < 4.0]
+        user_message_history[user_id].append(now)
+        
+        if len(user_message_history[user_id]) >= 5:
+            user_cooldowns[user_id] = now + 15.0 
+            user_message_history[user_id] = []
+            await event.answer("⚠️ Juda tez-tez xabar yozganingiz uchun 15 sekundga bloklandingiz. Ozgina kuting!")
+            return
+            
     return await handler(event, data)
 
 dp.message.middleware(anti_flood_middleware)
@@ -171,6 +184,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         if referrer_str.isdigit():
             referrer_id = int(referrer_str)
 
+    # --- AUTO-VERIFY (Botga kirishi bilan obunani avtomatik tekshirish) ---
     is_subscribed = await check_subscription(user_id)
     if not is_subscribed:
         sub_keyboard = InlineKeyboardMarkup(
@@ -202,10 +216,10 @@ async def cmd_help(message: types.Message, state: FSMContext):
     await state.clear()
     help_text = (
         "ℹ️ **Botdan foydalanish bo'yicha yo'riqnoma:**\n\n"
-        "• **Ovoz berish** — Telefon raqamingizni qoldirib ovoz berish jarayonida qatnashing.\n"
-        "• **Referal** — Shaxsiy havolangiz orqali do'stlaringizni taklif qiling.\n"
-        "• **Hisobim** — Balansingiz va ma'lumotlaringizni ko'ring.\n"
-        "• **To'lovlar** — Tasdiqlangan isbotlar kanalini kuzatib boring.\n\n"
+        "• **Ovoz berish** — Telefon raqamingizni qoldirib qatnashing.\n"
+        "• **Referal** — Do'stlaringizni taklif qilib har biri uchun bonus oling.\n"
+        "• **Hisobim** — Balansingizni ko'ring.\n"
+        "• **To'lovlar** — Isbotlar kanalini kuzating.\n\n"
         f"Savollar bo'yicha: {ADMIN_USERNAME}"
     )
     await message.answer(help_text, parse_mode="Markdown")
@@ -238,18 +252,24 @@ async def admin_panel(message: types.Message, state: FSMContext):
         f"📊 Jami foydalanuvchilar: {total_users} ta\n"
         f"📈 Bugun qo'shilganlar: {today_users} ta\n\n"
         f"📌 **Buyruqlar:**\n"
-        f"• Hammaga xabar yuborish: `/broadcast [xabar matni]`"
+        f"• Hammaga xabar yuborish (rasm va tugma bilan): `/broadcast`"
     )
     await message.answer(text, parse_mode="Markdown")
 
+# --- RASM VA TUGMALI BROADCAST (ADMIN UCHUN) ---
 @dp.message(Command("broadcast"))
 async def broadcast_handler(message: types.Message, state: FSMContext):
-    await state.clear()
     if message.from_user.username != ADMIN_USERNAME.replace('@', ''):
         return
+    
     text_to_send = message.text.replace("/broadcast", "").strip()
     if not text_to_send:
-        await message.answer("⚠️ Yuboriladigan xabar matnini kiriting.")
+        await message.answer(
+            "⚠️ **Broadcast ishlatish tartibi:**\n\n"
+            "Matn yuborish uchun:\n`/broadcast Xabar matni`\n\n"
+            "Rasm bilan yuborish uchun rasm tagiga izoh (caption) qilib yuboring.",
+            parse_mode="Markdown"
+        )
         return
     
     conn = sqlite3.connect("bot_database.db")
@@ -261,7 +281,11 @@ async def broadcast_handler(message: types.Message, state: FSMContext):
     success, failed = 0, 0
     for u in users:
         try:
-            await bot.send_message(u[0], text_to_send)
+            if message.photo:
+                photo_id = message.photo[-1].file_id
+                await bot.send_photo(u[0], photo=photo_id, caption=message.caption or "")
+            else:
+                await bot.send_message(u[0], text_to_send)
             success += 1
             await asyncio.sleep(0.04)
         except Exception:
@@ -292,7 +316,8 @@ async def referal_handler(message: types.Message, state: FSMContext):
     
     text = (
         f"👥 **Sizning taklif havolangiz:**\n\n`{ref_link}`\n\n"
-        f"📊 Taklif qilganlaringiz: {user_data['invited_count']} ta"
+        f"📊 Taklif qilganlaringiz: {user_data['invited_count']} ta\n"
+        f"🎁 Takliflar uchun berilgan bonus: {user_data['invited_count'] * REFERRAL_BONUS} so'm"
     )
     await message.answer(text, parse_mode="Markdown")
 
@@ -339,7 +364,6 @@ async def back_handler(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Asosiy menyu:", reply_markup=main_keyboard)
 
-# --- TELEFON RAQAMNI VALIDATSIYA QILISH ---
 @dp.message(VoteState.waiting_for_phone)
 async def process_phone(message: types.Message, state: FSMContext):
     phone = ""
@@ -387,7 +411,6 @@ async def main():
     asyncio.create_task(self_ping())
     asyncio.create_task(database_backup_task())
     
-    # --- TELEGRAM BUYRUQLAR MENYUSINI O'RNATISH ( / ni bosganda chiqadi ) ---
     commands = [
         BotCommand(command="start", description="Botni qayta ishga tushirish"),
         BotCommand(command="help", description="Yordam va qo'llanma"),
