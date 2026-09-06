@@ -23,6 +23,9 @@ ADMIN_USERNAME = "@buxgalter_0011"
 CHANNEL_USERNAME = "@open_budjet_20277"
 ADMIN_USER_ID = None 
 
+REFERRAL_BONUS = 500       # Har bir taklif uchun beriladigan summa (so'm)
+MIN_WITHDRAW_LIMIT = 15000  
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -42,6 +45,7 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             full_name TEXT,
             phone TEXT,
+            balance INTEGER DEFAULT 0,
             invited_count INTEGER DEFAULT 0,
             votes_count INTEGER DEFAULT 0,
             referrer_id INTEGER DEFAULT 0,
@@ -60,11 +64,11 @@ def add_user(user_id, full_name, referrer_id=0):
         ref = referrer_id if referrer_id != user_id else 0
         joined_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
-            "INSERT INTO users (user_id, full_name, phone, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, '', 0, 0, ?, ?)",
+            "INSERT INTO users (user_id, full_name, phone, balance, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, '', 0, 0, 0, ?, ?)",
             (user_id, full_name, ref, joined_date)
         )
         if ref != 0:
-            cursor.execute("UPDATE users SET invited_count = invited_count + 1 WHERE user_id = ?", (ref,))
+            cursor.execute("UPDATE users SET invited_count = invited_count + 1, balance = balance + ? WHERE user_id = ?", (REFERRAL_BONUS, ref))
         conn.commit()
     conn.close()
 
@@ -78,12 +82,12 @@ def update_user_phone(user_id, phone):
 def get_user_data(user_id):
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT phone, invited_count, votes_count, referrer_id FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT phone, balance, invited_count, votes_count, referrer_id FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     conn.close()
     if row:
-        return {"phone": row[0], "invited_count": row[1], "votes_count": row[2], "referrer_id": row[3]}
-    return {"phone": "", "invited_count": 0, "votes_count": 0, "referrer_id": 0}
+        return {"phone": row[0], "balance": row[1], "invited_count": row[2], "votes_count": row[3], "referrer_id": row[4]}
+    return {"phone": "", "balance": 0, "invited_count": 0, "votes_count": 0, "referrer_id": 0}
 
 def get_total_users_count():
     conn = sqlite3.connect("bot_database.db")
@@ -148,7 +152,7 @@ async def anti_flood_middleware(handler, event, data):
         user_message_history[user_id].append(now)
         
         if len(user_message_history[user_id]) >= 6:
-            user_cooldowns[user_id] = now + 5.0 # 5 sekund kutish
+            user_cooldowns[user_id] = now + 5.0 # 5 sekund blok
             user_message_history[user_id] = []
             await event.answer("⚠️ Juda tez-tez bosayotganingiz uchun 5 sekundga to'xtatildingiz.")
             return
@@ -214,8 +218,8 @@ async def cmd_help(message: types.Message, state: FSMContext):
     help_text = (
         "ℹ️ **Botdan foydalanish bo'yicha yo'riqnoma:**\n\n"
         "• **Ovoz berish** — Telefon raqamingizni qoldirib qatnashing.\n"
-        "• **Referal** — Do'stlaringizni taklif qiling.\n"
-        "• **Hisobim** — Ma'lumotlaringizni ko'ring.\n"
+        "• **Referal** — Do'stlaringizni taklif qilib bonus oling.\n"
+        "• **Hisobim** — Balansingizni ko'ring.\n"
         "• **To'lovlar** — Isbotlar kanalini kuzating.\n\n"
         f"Savollar bo'yicha: {ADMIN_USERNAME}"
     )
@@ -284,7 +288,7 @@ async def broadcast_handler(message: types.Message, state: FSMContext):
             
     await message.answer(f"📢 Xabar tarqatildi!\n✅ Muvaffaqiyatli: {success}\n❌ Xato: {failed}")
 
-# --- TUGMALARNI ANIQ USHLASH (ISHLASHINI KAFOLATLAYDI) ---
+# --- TUGMALARNI ANIQ USHLASH VA ISHLATISH ---
 @dp.message(F.text == "👤 Admin bilan bog'lanish")
 async def admin_contact_handler(message: types.Message, state: FSMContext):
     await state.clear()
@@ -306,12 +310,21 @@ async def referal_handler(message: types.Message, state: FSMContext):
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
     
+    # Bitta tugma orqali do'stlarga ulashish (Share URL)
+    share_url = f"https://t.me/share/url?url={ref_link}&text=🌟+Open+Budget+botiga+kiring+va+qo'llab-quvvatlang!"
+    ref_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="↗️ Do'stlarga ulashish", url=share_url)]
+        ]
+    )
+    
     text = (
         f"👥 **Sizning taklif havolangiz:**\n\n"
         f"`{ref_link}`\n\n"
-        f"📊 Taklif qilgan do'stlaringiz soni: {user_data['invited_count']} ta"
+        f"📊 Taklif qilgan do'stlaringiz soni: {user_data['invited_count']} ta\n"
+        f"🎁 Ishlab topilgan bonus: {user_data['invited_count'] * REFERRAL_BONUS} so'm"
     )
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text, parse_mode="Markdown", reply_markup=ref_keyboard)
 
 @dp.message(F.text == "💰 Hisobim")
 async def balance_handler(message: types.Message, state: FSMContext):
@@ -319,13 +332,38 @@ async def balance_handler(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
     
+    withdraw_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💸 Pulni yechib olish", callback_data="withdraw_request")]
+        ]
+    )
+    
     text = (
         f"👤 **Foydalanuvchi:** {message.from_user.first_name}\n"
         f"📱 **Telefon:** {user_data['phone'] if user_data['phone'] else 'Kiritilmagan'}\n"
         f"👥 **Takliflar:** {user_data['invited_count']} ta\n"
+        f"💰 **Balansingiz:** {user_data['balance']} so'm\n"
         f"🗳 **Tasdiqlangan ovozlar:** {user_data['votes_count']} ta"
     )
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text, parse_mode="Markdown", reply_markup=withdraw_keyboard)
+
+@dp.callback_query(F.data == "withdraw_request")
+async def withdraw_callback(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    user_data = get_user_data(user_id)
+    
+    if user_data['balance'] < MIN_WITHDRAW_LIMIT:
+        await callback.answer(f"❌ Pul yechib olish uchun minimal summa {MIN_WITHDRAW_LIMIT} so'm bo'lishi kerak!", show_alert=True)
+        return
+        
+    await callback.message.answer(
+        f"✅ Pulni yechish uchun arizangiz tayyorlandi!\n"
+        f"Iltimos, ushbu summani olish uchun adminimizga yozing: {ADMIN_USERNAME}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Adminga yozish", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")]
+        ])
+    )
+    await callback.answer()
 
 @dp.message(F.text == "📋 To'lovlar")
 async def proofs_handler(message: types.Message, state: FSMContext):
