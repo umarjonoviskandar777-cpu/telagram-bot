@@ -23,9 +23,6 @@ ADMIN_USERNAME = "@buxgalter_0011"
 CHANNEL_USERNAME = "@open_budjet_20277"
 ADMIN_USER_ID = None 
 
-REFERRAL_BONUS = 500       # Har bir taklif qilingan do'st uchun beriladigan summa (so'm)
-MIN_WITHDRAW_LIMIT = 15000  
-
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -45,7 +42,6 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             full_name TEXT,
             phone TEXT,
-            balance INTEGER DEFAULT 0,
             invited_count INTEGER DEFAULT 0,
             votes_count INTEGER DEFAULT 0,
             referrer_id INTEGER DEFAULT 0,
@@ -58,18 +54,17 @@ def init_db():
 def add_user(user_id, full_name, referrer_id=0):
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id, referrer_id FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
     if not user:
         ref = referrer_id if referrer_id != user_id else 0
         joined_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
-            "INSERT INTO users (user_id, full_name, phone, balance, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, ?, 0, 1, 0, ?, ?)",
-            (user_id, full_name, '', ref, joined_date)
+            "INSERT INTO users (user_id, full_name, phone, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, '', 1, 0, ?, ?)",
+            (user_id, full_name, ref, joined_date)
         )
         if ref != 0:
-            # Referal uchun bonus qo'shamiz
-            cursor.execute("UPDATE users SET invited_count = invited_count + 1, balance = balance + ? WHERE user_id = ?", (REFERRAL_BONUS, ref))
+            cursor.execute("UPDATE users SET invited_count = invited_count + 1 WHERE user_id = ?", (ref,))
         conn.commit()
     conn.close()
 
@@ -83,12 +78,12 @@ def update_user_phone(user_id, phone):
 def get_user_data(user_id):
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT phone, balance, invited_count, votes_count, referrer_id FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT phone, invited_count, votes_count, referrer_id FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     conn.close()
     if row:
-        return {"phone": row[0], "balance": row[1], "invited_count": row[2], "votes_count": row[3], "referrer_id": row[4]}
-    return {"phone": "", "balance": 0, "invited_count": 0, "votes_count": 0, "referrer_id": 0}
+        return {"phone": row[0], "invited_count": row[1], "votes_count": row[2], "referrer_id": row[3]}
+    return {"phone": "", "invited_count": 0, "votes_count": 0, "referrer_id": 0}
 
 def get_total_users_count():
     conn = sqlite3.connect("bot_database.db")
@@ -184,7 +179,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
         if referrer_str.isdigit():
             referrer_id = int(referrer_str)
 
-    # --- AUTO-VERIFY (Botga kirishi bilan obunani avtomatik tekshirish) ---
     is_subscribed = await check_subscription(user_id)
     if not is_subscribed:
         sub_keyboard = InlineKeyboardMarkup(
@@ -217,8 +211,8 @@ async def cmd_help(message: types.Message, state: FSMContext):
     help_text = (
         "ℹ️ **Botdan foydalanish bo'yicha yo'riqnoma:**\n\n"
         "• **Ovoz berish** — Telefon raqamingizni qoldirib qatnashing.\n"
-        "• **Referal** — Do'stlaringizni taklif qilib har biri uchun bonus oling.\n"
-        "• **Hisobim** — Balansingizni ko'ring.\n"
+        "• **Referal** — Do'stlaringizni taklif qiling.\n"
+        "• **Hisobim** — Ma'lumotlaringizni ko'ring.\n"
         "• **To'lovlar** — Isbotlar kanalini kuzating.\n\n"
         f"Savollar bo'yicha: {ADMIN_USERNAME}"
     )
@@ -252,24 +246,18 @@ async def admin_panel(message: types.Message, state: FSMContext):
         f"📊 Jami foydalanuvchilar: {total_users} ta\n"
         f"📈 Bugun qo'shilganlar: {today_users} ta\n\n"
         f"📌 **Buyruqlar:**\n"
-        f"• Hammaga xabar yuborish (rasm va tugma bilan): `/broadcast`"
+        f"• Hammaga xabar yuborish: `/broadcast`"
     )
     await message.answer(text, parse_mode="Markdown")
 
-# --- RASM VA TUGMALI BROADCAST (ADMIN UCHUN) ---
 @dp.message(Command("broadcast"))
 async def broadcast_handler(message: types.Message, state: FSMContext):
     if message.from_user.username != ADMIN_USERNAME.replace('@', ''):
         return
     
     text_to_send = message.text.replace("/broadcast", "").strip()
-    if not text_to_send:
-        await message.answer(
-            "⚠️ **Broadcast ishlatish tartibi:**\n\n"
-            "Matn yuborish uchun:\n`/broadcast Xabar matni`\n\n"
-            "Rasm bilan yuborish uchun rasm tagiga izoh (caption) qilib yuboring.",
-            parse_mode="Markdown"
-        )
+    if not text_to_send and not message.caption:
+        await message.answer("⚠️ Yuboriladigan xabar matnini kiriting.")
         return
     
     conn = sqlite3.connect("bot_database.db")
@@ -312,12 +300,13 @@ async def referal_handler(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
     bot_info = await bot.get_me()
+    # Havolani bir qatorda hech qanday bo'shliqsiz chiqadigan qildik
     ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
     
     text = (
-        f"👥 **Sizning taklif havolangiz:**\n\n`{ref_link}`\n\n"
-        f"📊 Taklif qilganlaringiz: {user_data['invited_count']} ta\n"
-        f"🎁 Takliflar uchun berilgan bonus: {user_data['invited_count'] * REFERRAL_BONUS} so'm"
+        f"👥 **Sizning taklif havolangiz:**\n\n"
+        f"{ref_link}\n\n"
+        f"📊 Taklif qilgan do'stlaringiz soni: {user_data['invited_count']} ta"
     )
     await message.answer(text, parse_mode="Markdown")
 
@@ -327,10 +316,12 @@ async def balance_handler(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
     
+    # Pul miqdorlari butunlay olib tashlandi, faqat raqamlar va holat qoldi
     text = (
         f"👤 **Foydalanuvchi:** {message.from_user.first_name}\n"
         f"📱 **Telefon:** {user_data['phone'] if user_data['phone'] else 'Kiritilmagan'}\n"
-        f"💰 **Balansingiz:** {user_data['balance']} so'm"
+        f"👥 **Takliflar:** {user_data['invited_count']} ta\n"
+        f"🗳 **Tasdiqlangan ovozlar:** {user_data['votes_count']} ta"
     )
     await message.answer(text, parse_mode="Markdown")
 
