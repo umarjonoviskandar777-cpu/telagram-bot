@@ -1,6 +1,7 @@
 import os
 import asyncio
 import sqlite3
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
@@ -343,6 +344,21 @@ async def process_phone(message: types.Message, state: FSMContext):
 async def handle_ping(request):
     return web.Response(text="Bot is running!")
 
+# O'zini o'zi doimiy uyg'otib turuvchi funksiya (Self-Ping)
+async def self_ping():
+    # Render'dagi o'zingizning veb-servis havolangiz
+    url = "https://telagram-bot-0ftz.onrender.com"
+    await asyncio.sleep(15)  # Server to'liq yonib olishi uchun 15 sekund kutadi
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(url) as response:
+                    print(f"Self-ping yuborildi, status: {response.status}")
+            except Exception as e:
+                print(f"Self-ping xatoligi: {e}")
+            # Har 3 daqiqada (180 sekund) o'ziga o'zi so'rov yuboradi
+            await asyncio.sleep(180)
+
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", handle_ping)
@@ -355,6 +371,10 @@ async def start_web_server():
 async def main():
     init_db()
     await start_web_server()
+    
+    # O'zini o'zi uyg'otib turuvchi feyk so'rovni fon rejimida ishga tushiramiz
+    asyncio.create_task(self_ping())
+    
     print("Bot to'liq professional va barqaror holda ishga tushmoqda...")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
