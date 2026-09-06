@@ -60,9 +60,12 @@ def add_user(user_id, full_name, referrer_id=0):
     cursor = conn.cursor()
     cursor.execute("SELECT user_id, referrer_id FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
+    
+    joined_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ref = referrer_id if referrer_id != user_id else 0
+
     if not user:
-        ref = referrer_id if referrer_id != user_id else 0
-        joined_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Mutlaqo yangi foydalanuvchi
         cursor.execute(
             "INSERT INTO users (user_id, full_name, phone, balance, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, '', 0, 0, 0, ?, ?)",
             (user_id, full_name, ref, joined_date)
@@ -70,6 +73,13 @@ def add_user(user_id, full_name, referrer_id=0):
         if ref != 0:
             cursor.execute("UPDATE users SET invited_count = invited_count + 1, balance = balance + ? WHERE user_id = ?", (REFERRAL_BONUS, ref))
         conn.commit()
+    else:
+        # Agar foydalanuvchi oldin bo'lib, lekin referali bo'lmasa va hozir havoladan kirgan bo'lsa
+        if user[1] == 0 and ref != 0:
+            cursor.execute("UPDATE users SET referrer_id = ? WHERE user_id = ?", (ref, user_id))
+            cursor.execute("UPDATE users SET invited_count = invited_count + 1, balance = balance + ? WHERE user_id = ?", (REFERRAL_BONUS, ref))
+            conn.commit()
+            
     conn.close()
 
 def update_user_phone(user_id, phone):
@@ -186,6 +196,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
     if referrer_id == user_id:
         referrer_id = 0
 
+    add_user(user_id, full_name, referrer_id)
+
     is_subscribed = await check_subscription(user_id)
     if not is_subscribed:
         sub_keyboard = InlineKeyboardMarkup(
@@ -194,7 +206,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
                 [InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_sub")]
             ]
         )
-        add_user(user_id, full_name, referrer_id)
         await message.answer(
             f"Assalomu alaykum, **{full_name}**!\n\n"
             f"⚠️ Botdan to'liq foydalanish uchun avval rasmiy kanalimizga obuna bo'lishingiz kerak!",
@@ -202,8 +213,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
             parse_mode="Markdown"
         )
         return
-
-    add_user(user_id, full_name, referrer_id)
 
     welcome_text = (
         f"Assalomu alaykum, **{full_name}**!\n\n"
@@ -310,7 +319,6 @@ async def referal_handler(message: types.Message, state: FSMContext):
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
     
-    # Bitta tugma orqali do'stlarga ulashish (Share URL)
     share_url = f"https://t.me/share/url?url={ref_link}&text=🌟+Open+Budget+botiga+kiring+va+qo'llab-quvvatlang!"
     ref_keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
