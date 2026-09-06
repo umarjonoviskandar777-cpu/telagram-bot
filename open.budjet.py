@@ -26,7 +26,7 @@ ADMIN_USER_ID = None
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Anti-Flood uchun lug'atlar (5 tadan ko'p xabar yozsa 15 sekund kutish)
+# Anti-Flood uchun lug'atlar (5 sekundlik blok)
 user_message_history = {}
 user_cooldowns = {}
 
@@ -54,13 +54,13 @@ def init_db():
 def add_user(user_id, full_name, referrer_id=0):
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT user_id, referrer_id FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
     if not user:
         ref = referrer_id if referrer_id != user_id else 0
         joined_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
-            "INSERT INTO users (user_id, full_name, phone, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, '', 1, 0, ?, ?)",
+            "INSERT INTO users (user_id, full_name, phone, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, '', 0, 0, ?, ?)",
             (user_id, full_name, ref, joined_date)
         )
         if ref != 0:
@@ -129,7 +129,7 @@ async def database_backup_task():
             logging.error(f"Backup yuborishda xatolik: {e}")
         await asyncio.sleep(86400)
 
-# --- ANTI-FLOOD (5 tadan ko'p xabar yozsa 15 sekund bloklash) ---
+# --- ANTI-FLOOD (5 sekundlik blok) ---
 @dp.message.middleware()
 async def anti_flood_middleware(handler, event, data):
     if isinstance(event, types.Message) and event.from_user:
@@ -138,19 +138,19 @@ async def anti_flood_middleware(handler, event, data):
         
         if user_id in user_cooldowns and now < user_cooldowns[user_id]:
             left = int(user_cooldowns[user_id] - now)
-            await event.answer(f"⚠️ Juda ko'p va tez yozdingiz! Iltimos, {left} sekund kuting.")
+            await event.answer(f"⚠️ Juda tez bosyapsiz! Iltimos, {left} sekund kuting.")
             return
         
         if user_id not in user_message_history:
             user_message_history[user_id] = []
         
-        user_message_history[user_id] = [t for t in user_message_history[user_id] if now - t < 4.0]
+        user_message_history[user_id] = [t for t in user_message_history[user_id] if now - t < 3.0]
         user_message_history[user_id].append(now)
         
-        if len(user_message_history[user_id]) >= 5:
-            user_cooldowns[user_id] = now + 15.0 
+        if len(user_message_history[user_id]) >= 6:
+            user_cooldowns[user_id] = now + 5.0 # 5 sekund kutish
             user_message_history[user_id] = []
-            await event.answer("⚠️ Juda tez-tez xabar yozganingiz uchun 15 sekundga bloklandingiz. Ozgina kuting!")
+            await event.answer("⚠️ Juda tez-tez bosayotganingiz uchun 5 sekundga to'xtatildingiz.")
             return
             
     return await handler(event, data)
@@ -178,6 +178,9 @@ async def cmd_start(message: types.Message, state: FSMContext):
         referrer_str = args[1].replace("ref", "")
         if referrer_str.isdigit():
             referrer_id = int(referrer_str)
+
+    if referrer_id == user_id:
+        referrer_id = 0
 
     is_subscribed = await check_subscription(user_id)
     if not is_subscribed:
@@ -281,7 +284,8 @@ async def broadcast_handler(message: types.Message, state: FSMContext):
             
     await message.answer(f"📢 Xabar tarqatildi!\n✅ Muvaffaqiyatli: {success}\n❌ Xato: {failed}")
 
-@dp.message(F.text.func(lambda text: text and "Admin bilan bog'lanish" in text))
+# --- TUGMALARNI ANIQ USHLASH (ISHLASHINI KAFOLATLAYDI) ---
+@dp.message(F.text == "👤 Admin bilan bog'lanish")
 async def admin_contact_handler(message: types.Message, state: FSMContext):
     await state.clear()
     admin_inline = InlineKeyboardMarkup(
@@ -294,29 +298,27 @@ async def admin_contact_handler(message: types.Message, state: FSMContext):
         reply_markup=admin_inline
     )
 
-@dp.message(F.text.func(lambda text: text and "Referal" in text))
+@dp.message(F.text == "👥 Referal")
 async def referal_handler(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
     bot_info = await bot.get_me()
-    # Havolani bir qatorda hech qanday bo'shliqsiz chiqadigan qildik
     ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
     
     text = (
         f"👥 **Sizning taklif havolangiz:**\n\n"
-        f"{ref_link}\n\n"
+        f"`{ref_link}`\n\n"
         f"📊 Taklif qilgan do'stlaringiz soni: {user_data['invited_count']} ta"
     )
     await message.answer(text, parse_mode="Markdown")
 
-@dp.message(F.text.func(lambda text: text and "Hisobim" in text))
+@dp.message(F.text == "💰 Hisobim")
 async def balance_handler(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
     
-    # Pul miqdorlari butunlay olib tashlandi, faqat raqamlar va holat qoldi
     text = (
         f"👤 **Foydalanuvchi:** {message.from_user.first_name}\n"
         f"📱 **Telefon:** {user_data['phone'] if user_data['phone'] else 'Kiritilmagan'}\n"
@@ -325,14 +327,14 @@ async def balance_handler(message: types.Message, state: FSMContext):
     )
     await message.answer(text, parse_mode="Markdown")
 
-@dp.message(F.text.func(lambda text: text and "To'lovlar" in text))
+@dp.message(F.text == "📋 To'lovlar")
 async def proofs_handler(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("📋 Barcha isbotlar rasmiy kanalda e'lon qilinadi.", reply_markup=InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="📢 Kanal", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")] ]
     ))
 
-@dp.message(F.text.func(lambda text: text and "Ovoz berish" in text))
+@dp.message(F.text == "🗳 Ovoz berish")
 async def vote_handler(message: types.Message, state: FSMContext):
     await state.clear()
     is_subscribed = await check_subscription(message.from_user.id)
