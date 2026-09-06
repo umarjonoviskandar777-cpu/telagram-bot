@@ -1,22 +1,27 @@
 import os
 import asyncio
 import sqlite3
+import logging
 import aiohttp
+from datetime import datetime
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, BotCommand
 
-# Tokenni Render'dagi Environment Variables'dan avtomatik o'qiydi
+# 1. Professional Logging sozlamasi
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Tokenni Render'dan o'qish
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 if not BOT_TOKEN:
     raise ValueError("XATOLIK: Render'da BOT_TOKEN topilmadi!")
 
 ADMIN_USERNAME = "@buxgalter_0011"
 CHANNEL_USERNAME = "@open_budjet_20277"
+ADMIN_USER_ID = None 
 
 VOTE_REWARD = 0       
 REFERRAL_BONUS = 0       
@@ -25,10 +30,13 @@ MIN_WITHDRAW_LIMIT = 15000
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Anti-Flood (Takroriy bosishdan himoya)
+last_request_time = {}
+
 class VoteState(StatesGroup):
     waiting_for_phone = State()
-    waiting_for_screenshot = State()
 
+# --- BAZA BILAN ISHLASH ---
 def init_db():
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
@@ -40,7 +48,8 @@ def init_db():
             balance INTEGER DEFAULT 0,
             invited_count INTEGER DEFAULT 0,
             votes_count INTEGER DEFAULT 0,
-            referrer_id INTEGER DEFAULT 0
+            referrer_id INTEGER DEFAULT 0,
+            joined_date TEXT
         )
     """)
     conn.commit()
@@ -49,11 +58,15 @@ def init_db():
 def add_user(user_id, full_name, referrer_id=0):
     conn = sqlite3.connect("bot_database.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT user_id, referrer_id FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
     if not user:
         ref = referrer_id if referrer_id != user_id else 0
-        cursor.execute("INSERT INTO users (user_id, full_name, phone, balance, invited_count, votes_count, referrer_id) VALUES (?, ?, '', 0, 0, 0, ?)", (user_id, full_name, ref))
+        joined_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "INSERT INTO users (user_id, full_name, phone, balance, invited_count, votes_count, referrer_id, joined_date) VALUES (?, ?, '', 0, 0, 0, ?, ?)",
+            (user_id, full_name, ref, joined_date)
+        )
         if ref != 0:
             cursor.execute("UPDATE users SET invited_count = invited_count + 1 WHERE user_id = ?", (ref,))
         conn.commit()
@@ -84,15 +97,57 @@ def get_total_users_count():
     conn.close()
     return count
 
+def get_today_users_count():
+    conn = sqlite3.connect("bot_database.db")
+    cursor = conn.cursor()
+    today = datetime.now().strftime("%Y-%m-%d")
+    cursor.execute("SELECT COUNT(*) FROM users WHERE joined_date LIKE ?", (f"{today}%",))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
 async def check_subscription(user_id: int):
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
         if member.status in ["creator", "administrator", "member"]:
             return True
     except Exception as e:
-        print(f"Obunani tekshirishda xatolik: {e}")
+        logging.error(f"Obunani tekshirishda xatolik: {e}")
         return False
     return False
+
+# --- AVTOMATIK BACKUP TIZIMI ---
+async def database_backup_task():
+    await asyncio.sleep(30)
+    while True:
+        try:
+            if ADMIN_USER_ID:
+                if os.path.exists("bot_database.db"):
+                    from aiogram.types import FSInputFile
+                    file = FSInputFile("bot_database.db")
+                    await bot.send_document(
+                        ADMIN_USER_ID, 
+                        file, 
+                        caption=f"📁 Avtomatik Database Backup: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                    )
+        except Exception as e:
+            logging.error(f"Backup yuborishda xatolik: {e}")
+        await asyncio.sleep(86400)
+
+# --- ANTI-FLOOD MIDDLEWARE ---
+@dp.message.middleware()
+async def anti_flood_middleware(handler, event, data):
+    if isinstance(event, types.Message) and event.from_user:
+        user_id = event.from_user.id
+        now = datetime.now().timestamp()
+        if user_id in last_request_time:
+            if now - last_request_time[user_id] < 0.8:
+                await event.answer("⚠️ Juda tez-tez yozyapsiz! Iltimos, ozgina kuting.")
+                return
+        last_request_time[user_id] = now
+    return await handler(event, data)
+
+dp.message.middleware(anti_flood_middleware)
 
 main_keyboard = ReplyKeyboardMarkup(
     keyboard=[
@@ -126,7 +181,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         )
         add_user(user_id, full_name, referrer_id)
         await message.answer(
-            f"Assalomu alaykum, **{full_name}** !\n\n"
+            f"Assalomu alaykum, **{full_name}**!\n\n"
             f"⚠️ Botdan to'liq foydalanish uchun avval rasmiy kanalimizga obuna bo'lishingiz kerak!",
             reply_markup=sub_keyboard,
             parse_mode="Markdown"
@@ -136,12 +191,24 @@ async def cmd_start(message: types.Message, state: FSMContext):
     add_user(user_id, full_name, referrer_id)
 
     welcome_text = (
-        f"Assalomu alaykum, **{full_name}** !\n\n"
+        f"Assalomu alaykum, **{full_name}**!\n\n"
         f"🌟 **Open Budget** rasmiy ko'makchi botiga xush kelibsiz!\n"
-        f"Hozirda mavsum oralig'idamiz. Mavsum boshlanganda ovoz berish va mukofotlar to'liq faollashadi.\n\n"
         f"Quyidagi tugmalardan birini tanlang:"
     )
     await message.answer(text=welcome_text, reply_markup=main_keyboard, parse_mode="Markdown")
+
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message, state: FSMContext):
+    await state.clear()
+    help_text = (
+        "ℹ️ **Botdan foydalanish bo'yicha yo'riqnoma:**\n\n"
+        "• **Ovoz berish** — Telefon raqamingizni qoldirib ovoz berish jarayonida qatnashing.\n"
+        "• **Referal** — Shaxsiy havolangiz orqali do'stlaringizni taklif qiling.\n"
+        "• **Hisobim** — Balansingiz va ma'lumotlaringizni ko'ring.\n"
+        "• **To'lovlar** — Tasdiqlangan isbotlar kanalini kuzatib boring.\n\n"
+        f"Savollar bo'yicha: {ADMIN_USERNAME}"
+    )
+    await message.answer(help_text, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "check_sub")
 async def callback_check_sub(callback: types.CallbackQuery, state: FSMContext):
@@ -153,19 +220,25 @@ async def callback_check_sub(callback: types.CallbackQuery, state: FSMContext):
         text = "Rahmat! Obuna tasdiqlandi. Marhamat, botdan foydalanishingiz mumkin:"
         await callback.message.answer(text=text, reply_markup=main_keyboard)
     else:
-        await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz yoki bot kanalda admin emas!", show_alert=True)
+        await callback.answer("❌ Siz hali kanalga obuna bo'lmadingiz!", show_alert=True)
 
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message, state: FSMContext):
+    global ADMIN_USER_ID
     await state.clear()
     if message.from_user.username != ADMIN_USERNAME.replace('@', ''):
         return
+    
+    ADMIN_USER_ID = message.from_user.id
     total_users = get_total_users_count()
+    today_users = get_today_users_count()
+    
     text = (
         f"👑 **Admin Boshqaruv Paneli**\n\n"
-        f"📊 Botdagi jami foydalanuvchilar: {total_users} ta\n\n"
+        f"📊 Jami foydalanuvchilar: {total_users} ta\n"
+        f"📈 Bugun qo'shilganlar: {today_users} ta\n\n"
         f"📌 **Buyruqlar:**\n"
-        f"• Hamma foydalanuvchilarga xabar yuborish uchun: `/broadcast [xabar matni]` yozing."
+        f"• Hammaga xabar yuborish: `/broadcast [xabar matni]`"
     )
     await message.answer(text, parse_mode="Markdown")
 
@@ -176,7 +249,7 @@ async def broadcast_handler(message: types.Message, state: FSMContext):
         return
     text_to_send = message.text.replace("/broadcast", "").strip()
     if not text_to_send:
-        await message.answer("⚠️ Yuboriladigan xabar matnini kiriting. Masalan: `/broadcast Salom hammaga!`", parse_mode="Markdown")
+        await message.answer("⚠️ Yuboriladigan xabar matnini kiriting.")
         return
     
     conn = sqlite3.connect("bot_database.db")
@@ -185,8 +258,7 @@ async def broadcast_handler(message: types.Message, state: FSMContext):
     users = cursor.fetchall()
     conn.close()
     
-    success = 0
-    failed = 0
+    success, failed = 0, 0
     for u in users:
         try:
             await bot.send_message(u[0], text_to_send)
@@ -206,7 +278,7 @@ async def admin_contact_handler(message: types.Message, state: FSMContext):
         ]
     )
     await message.answer(
-        f"👤 Savollar va takliflar bo'yicha to'g'ridan-to'g'ri adminimizga murojaat qilishingiz mumkin: {ADMIN_USERNAME}",
+        f"👤 Savollar bo'yicha adminimizga murojaat qiling: {ADMIN_USERNAME}",
         reply_markup=admin_inline
     )
 
@@ -215,25 +287,14 @@ async def referal_handler(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
-
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref{user_id}"
     
-    share_url = f"https://t.me/share/url?url={ref_link}&text=🌟+Open+Budget+botiga+kiring+va+obuna+bo'ling!"
-    
-    ref_keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="↗️ Do'stlarga ulashish", url=share_url)]
-        ]
-    )
-
     text = (
-        f"👥 **Sizning taklif havolangiz:**\n\n"
-        f"`{ref_link}`\n\n"
-        f"📊 **Siz taklif qilgan do'stlaringiz soni:** {user_data['invited_count']} ta\n\n"
-        f"Do'stlaringizni taklif qilib bazamizni kengaytiring!"
+        f"👥 **Sizning taklif havolangiz:**\n\n`{ref_link}`\n\n"
+        f"📊 Taklif qilganlaringiz: {user_data['invited_count']} ta"
     )
-    await message.answer(text, parse_mode="Markdown", reply_markup=ref_keyboard)
+    await message.answer(text, parse_mode="Markdown")
 
 @dp.message(F.text.func(lambda text: text and "Hisobim" in text))
 async def balance_handler(message: types.Message, state: FSMContext):
@@ -241,62 +302,26 @@ async def balance_handler(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     user_data = get_user_data(user_id)
     
-    withdraw_keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="💸 Pulni yechib olish", callback_data="withdraw_request")],
-            [InlineKeyboardButton(text="👤 Admin bilan bog'lanish", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")]
-        ]
-    )
-    
     text = (
         f"👤 **Foydalanuvchi:** {message.from_user.first_name}\n"
-        f"🆔 **ID:** {user_id}\n"
         f"📱 **Telefon:** {user_data['phone'] if user_data['phone'] else 'Kiritilmagan'}\n"
-        f"👥 **Taklif qilganlaringiz:** {user_data['invited_count']} ta\n"
-        f"💰 **Balansingiz:** {user_data['balance']} so'm\n"
-        f"🗳 **Tasdiqlangan ovozlaringiz:** {user_data['votes_count']} ta"
+        f"💰 **Balansingiz:** {user_data['balance']} so'm"
     )
-    await message.answer(text, parse_mode="Markdown", reply_markup=withdraw_keyboard)
-
-@dp.callback_query(F.data == "withdraw_request")
-async def withdraw_callback(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    user_data = get_user_data(user_id)
-    
-    if user_data['balance'] < MIN_WITHDRAW_LIMIT:
-        await callback.answer(f"❌ Pul yechib olish uchun minimal summa {MIN_WITHDRAW_LIMIT} so'm bo'lishi kerak!", show_alert=True)
-        return
-        
-    await callback.message.answer(
-        f"✅ Pulni yechish uchun arizangiz tayyorlandi!\n"
-        f"Iltimos, ushbu summani olish uchun adminimizga yozing: {ADMIN_USERNAME}",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💬 Adminga yozish", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")]
-        ])
-    )
-    await callback.answer()
+    await message.answer(text, parse_mode="Markdown")
 
 @dp.message(F.text.func(lambda text: text and "To'lovlar" in text))
 async def proofs_handler(message: types.Message, state: FSMContext):
     await state.clear()
-    channel_keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Isbotlar kanali", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")]
-        ]
-    )
-    text = (
-        "📋 **To'lovlar va isbotlar bo'limi:**\n\n"
-        "Barcha amalga oshirilgan to'lovlar va muvaffaqiyatli ovozlar quyidagi rasmiy kanalimizda e'lon qilib boriladi:\n\n"
-        "• Mavsum oralig'ida yangiliklar kanalda e'lon qilinadi ✅"
-    )
-    await message.answer(text, parse_mode="Markdown", reply_markup=channel_keyboard)
+    await message.answer("📋 Barcha isbotlar rasmiy kanalda e'lon qilinadi.", reply_markup=InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="📢 Kanal", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")] ]
+    ))
 
 @dp.message(F.text.func(lambda text: text and "Ovoz berish" in text))
 async def vote_handler(message: types.Message, state: FSMContext):
     await state.clear()
     is_subscribed = await check_subscription(message.from_user.id)
     if not is_subscribed:
-        await message.answer("⚠️ Avval kanalimizga obuna bo'ling! /start buyrug'ini bosing.")
+        await message.answer("⚠️ Avval kanalimizga obuna bo'ling!")
         return
 
     phone_keyboard = ReplyKeyboardMarkup(
@@ -306,20 +331,15 @@ async def vote_handler(message: types.Message, state: FSMContext):
         ],
         resize_keyboard=True
     )
-
-    text = (
-        "🗳 **Ovoz berish tartibi:**\n\n"
-        "Hozirda Open Budget mavsumi tugagan. Lekin sinov tariqasida telefon raqamingizni qoldirishingiz mumkin:\n\n"
-        "Namuna: `91 123-45-67` yoki +998901234567"
-    )
     await state.set_state(VoteState.waiting_for_phone)
-    await message.answer(text, parse_mode="Markdown", reply_markup=phone_keyboard)
+    await message.answer("📱 Iltimos, telefon raqamingizni yuboring (Masalan: +998901234567):", reply_markup=phone_keyboard)
 
 @dp.message(F.text == "🔙 Ortga")
 async def back_handler(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("Asosiy menyuga qaydingiz:", reply_markup=main_keyboard)
+    await message.answer("Asosiy menyu:", reply_markup=main_keyboard)
 
+# --- TELEFON RAQAMNI VALIDATSIYA QILISH ---
 @dp.message(VoteState.waiting_for_phone)
 async def process_phone(message: types.Message, state: FSMContext):
     phone = ""
@@ -327,36 +347,29 @@ async def process_phone(message: types.Message, state: FSMContext):
         phone = message.contact.phone_number
     elif message.text:
         phone = message.text.strip()
-    else:
-        await message.answer("Iltimos, telefon raqamingizni to'g'ri kiriting yoki tugmani bosing.")
-        return
+        cleaned_phone = phone.replace("+", "").replace(" ", "").replace("-", "")
+        if not cleaned_phone.isdigit() or len(cleaned_phone) < 9:
+            await message.answer("❌ Noto'g'ri raqam kiritildi! Iltimos, to'g'ri formatda kiriting (Masalan: +998901234567):")
+            return
 
     update_user_phone(message.from_user.id, phone)
-    
-    text = (
-        "✅ Telefon raqamingiz saqlandi!\n\n"
-        "🗳 Mavsum boshlanganda ushbu raqam orqali ovoz berish imkoniyati ochiladi."
-    )
-    await message.answer(text, reply_markup=main_keyboard)
+    await message.answer("✅ Telefon raqamingiz muvaffaqiyatli saqlandi!", reply_markup=main_keyboard)
     await state.clear()
 
-# Render veb-servis uchun port ochib turuvchi qism
+# --- SERVER VA SELF-PING ---
 async def handle_ping(request):
-    return web.Response(text="Bot is running!")
+    return web.Response(text="Bot is running safely!")
 
-# O'zini o'zi doimiy uyg'otib turuvchi funksiya (Self-Ping)
 async def self_ping():
-    # Render'dagi o'zingizning veb-servis havolangiz
     url = "https://telagram-bot-0ftz.onrender.com"
-    await asyncio.sleep(15)  # Server to'liq yonib olishi uchun 15 sekund kutadi
+    await asyncio.sleep(15)
     async with aiohttp.ClientSession() as session:
         while True:
             try:
                 async with session.get(url) as response:
-                    print(f"Self-ping yuborildi, status: {response.status}")
+                    logging.info(f"Self-ping status: {response.status}")
             except Exception as e:
-                print(f"Self-ping xatoligi: {e}")
-            # Har 3 daqiqada (180 sekund) o'ziga o'zi so'rov yuboradi
+                logging.error(f"Self-ping xatoligi: {e}")
             await asyncio.sleep(180)
 
 async def start_web_server():
@@ -371,16 +384,27 @@ async def start_web_server():
 async def main():
     init_db()
     await start_web_server()
-    
-    # O'zini o'zi uyg'otib turuvchi feyk so'rovni fon rejimida ishga tushiramiz
     asyncio.create_task(self_ping())
+    asyncio.create_task(database_backup_task())
     
-    print("Bot to'liq professional va barqaror holda ishga tushmoqda...")
+    # --- TELEGRAM BUYRUQLAR MENYUSINI O'RNATISH ( / ni bosganda chiqadi ) ---
+    commands = [
+        BotCommand(command="start", description="Botni qayta ishga tushirish"),
+        BotCommand(command="help", description="Yordam va qo'llanma"),
+        BotCommand(command="admin", description="Admin paneli (faqat admin uchun)")
+    ]
+    await bot.set_my_commands(commands)
+    
+    logging.info("Bot professional va xavfsiz rejimda ishga tushdi...")
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    
+    try:
+        await dp.start_polling(bot)
+    except Exception as e:
+        logging.critical(f"Kutilmagan xatolik tufayli bot to'xtadi: {e}")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        print("Bot to'xtatildi.")
+        logging.info("Bot qo'lda to'xtatildi.")
